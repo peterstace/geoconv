@@ -1,24 +1,39 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io/ioutil"
+	"log"
 	"math"
 	"os"
-	"strings"
 
 	"github.com/peterstace/simplefeatures/geom"
 )
 
 func main() {
-	c := TileCoordinates{21, 478841, 863802}
-	g := c.ToEnvelope().AsGeometry()
-	json.NewEncoder(os.Stdout).Encode(g)
-
-	g2, err := geom.UnmarshalWKT(strings.NewReader("POLYGON((115.904195 -31.931195,115.904195 -31.909139,115.87394 -31.909139,115.87394 -31.931195,115.904195 -31.931195))"))
+	input, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
-		panic(err)
+		log.Fatalf("could not read stdin: ", err)
 	}
-	json.NewEncoder(os.Stdout).Encode(g2)
+
+	g, err := geom.UnmarshalWKT(bytes.NewReader(input))
+	if err != nil {
+		log.Fatalf("could not unmarshal to WKT: %v", err)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(g); err != nil {
+		log.Fatalf("could not unmarshal to GeoJSON: %v", err)
+	}
+
+	//c := TileCoordinates{21, 478841, 863802}
+	//g := c.ToEnvelope().AsGeometry()
+	//json.NewEncoder(os.Stdout).Encode(g)
+
+	//g2, err := geom.UnmarshalWKT(strings.NewReader("POLYGON((115.904195 -31.931195,115.904195 -31.909139,115.87394 -31.909139,115.87394 -31.931195,115.904195 -31.931195))"))
+	//if err != nil {
+	//panic(err)
+	//}
+	//json.NewEncoder(os.Stdout).Encode(g2)
 }
 
 type TileCoordinates struct {
@@ -48,8 +63,8 @@ type PolySequence struct {
 	Coordinates []float64
 }
 
-func (s PolySequence) ToGeometry() geom.Envelope {
-}
+//func (s PolySequence) ToGeometry() geom.Envelope {
+//}
 
 /*
 
