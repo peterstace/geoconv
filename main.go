@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -18,11 +19,17 @@ func main() {
 	}
 
 	g, err := geom.UnmarshalWKT(bytes.NewReader(input))
-	if err != nil {
-		log.Fatalf("could not unmarshal to WKT: %v", err)
+	if err == nil {
+		if err := json.NewEncoder(os.Stdout).Encode(g); err != nil {
+			log.Fatalf("could not unmarshal to GeoJSON: %v", err)
+		}
+		return
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(g); err != nil {
-		log.Fatalf("could not unmarshal to GeoJSON: %v", err)
+
+	g, err = geom.UnmarshalGeoJSON(input)
+	if err == nil {
+		fmt.Println(g.AsText())
+		return
 	}
 
 	//c := TileCoordinates{21, 478841, 863802}
