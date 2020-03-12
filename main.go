@@ -29,7 +29,6 @@ func main() {
 	g, err = geom.UnmarshalGeoJSON(input)
 	if err == nil {
 		fmt.Println(g.AsText())
-		return
 	}
 
 	//c := TileCoordinates{21, 478841, 863802}
@@ -41,6 +40,17 @@ func main() {
 	//panic(err)
 	//}
 	//json.NewEncoder(os.Stdout).Encode(g2)
+
+	if g.IsPoint() {
+		pt := g.AsPoint()
+		xy, ok := pt.XY()
+		if ok {
+			for z := 17; z <= 22; z++ {
+				x, y := LatLonToTileCoord(xy.X, xy.Y, z)
+				fmt.Println(z, x, y)
+			}
+		}
+	}
 }
 
 type TileCoordinates struct {
@@ -81,3 +91,9 @@ lat_rad = arctan(sinh(π * (1 - 2 * ytile / n)))
 lat_deg = lat_rad * 180.0 / π
 
 */
+
+func LatLonToTileCoord(lon, lat float64, z int) (x int, y int) {
+	x = int(math.Floor((lon + 180.0) / 360.0 * (math.Exp2(float64(z)))))
+	y = int(math.Floor((1.0 - math.Log(math.Tan(lat*math.Pi/180.0)+1.0/math.Cos(lat*math.Pi/180.0))/math.Pi) / 2.0 * (math.Exp2(float64(z)))))
+	return
+}
