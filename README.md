@@ -15,3 +15,8 @@ The following input types are supported:
 | GeoJSON          | `geojson` | `{"type":"Point","coordinates":[151.2,-33.9]}` |                      |
 | Lon Lat          | `lonlat`  | `151.2,33.9`                                   | comma, space         |
 | Tile Coordinates | `tile`    | `21 1929379 1258703`                           | space, forward slash |
+
+# Open geojson.io
+
+If the `-o` flag is provided, then [geojson.io](geojson.io) will be opened with
+the geometry from the input loaded.
