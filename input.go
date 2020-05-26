@@ -47,7 +47,7 @@ func decodeUsingAny(input []byte) (geom.Geometry, error) {
 func decodeUsingWKT(input []byte) (geom.Geometry, error) {
 	// TODO: If we could detect _geometry validation_ errors here, we could
 	// bubble them up rather than using wrongFormatErr.
-	return geom.UnmarshalWKT(bytes.NewReader(input))
+	return geom.UnmarshalWKT(string(input))
 }
 
 func decodeUsingGeoJSON(input []byte) (geom.Geometry, error) {
@@ -77,7 +77,7 @@ func decodeUsingLonLat(input []byte) (geom.Geometry, error) {
 	if err != nil {
 		return geom.Geometry{}, err
 	}
-	return geom.NewPointF(x, y).AsGeometry(), nil
+	return geom.NewPointFromXY(geom.XY{X: x, Y: y}).AsGeometry(), nil
 }
 
 func decodeUsingTile(input []byte) (geom.Geometry, error) {

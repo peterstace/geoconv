@@ -7,3 +7,5 @@ github.com/peterstace/simplefeatures v0.8.1-0.20200301173801-71aa658bce98 h1:Az5
 github.com/peterstace/simplefeatures v0.8.1-0.20200301173801-71aa658bce98/go.mod h1:Y2q6ROfPN3DNMLPLCQlnKnhgnmXKVktsYpMxDThYijg=
 github.com/peterstace/simplefeatures v0.9.0 h1:hl2977iRuZcUxUbsLlSL5edrLWy/GN3uz0PDcLwJl4Q=
 github.com/peterstace/simplefeatures v0.9.0/go.mod h1:Y2q6ROfPN3DNMLPLCQlnKnhgnmXKVktsYpMxDThYijg=
+github.com/peterstace/simplefeatures v0.17.0 h1:0/pMjtSwcRZ6CWnYH7R1lClKmmyzMF6CKPtUEhyCdug=
+github.com/peterstace/simplefeatures v0.17.0/go.mod h1:E4tFQfvVfIznGAUgYwBq/zlFekolHqGZk2yvh6je/bM=
