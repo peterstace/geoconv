@@ -26,7 +26,7 @@ func main() {
 
 	if *open {
 		if err := openInBrowser(inputGeom); err != nil {
-			log.Fatal("could not open in browser: %v", err)
+			log.Fatalf("could not open in browser: %v", err)
 		}
 	}
 }

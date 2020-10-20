@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -26,7 +26,7 @@ func openInBrowser(g geom.Geometry) error {
 
 	out, err := exec.Command("open", u.String()).CombinedOutput()
 	if err != nil {
-		return errors.New(string(out))
+		return fmt.Errorf("%v: %v", err, string(out))
 	}
 	return nil
 }
