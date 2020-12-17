@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/peterstace/simplefeatures/geom"
 )
@@ -17,6 +19,21 @@ func output(g geom.Geometry) {
 	fmt.Println("GeoJSON")
 	json.NewEncoder(os.Stdout).Encode(g)
 	fmt.Println()
+
+	if g.IsPolygon() && g.AsPolygon().NumInteriorRings() == 0 {
+		seq := g.AsPolygon().ExteriorRing().Coordinates()
+		var coords []string
+		for i := 0; i < seq.Length(); i++ {
+			xy := seq.GetXY(i)
+			coords = append(coords,
+				strconv.FormatFloat(xy.X, 'f', -1, 64),
+				strconv.FormatFloat(xy.Y, 'f', -1, 64),
+			)
+		}
+		fmt.Println("Sequence")
+		fmt.Println(strings.Join(coords, ","))
+		fmt.Println()
+	}
 
 	centroid, ok := g.Centroid().XY()
 	if !ok {
