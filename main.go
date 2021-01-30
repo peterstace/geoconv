@@ -8,9 +8,9 @@ import (
 )
 
 func main() {
-	inputFormat := flag.String("i", "any", "input format")
-	outputFormat := flag.String("t", "all", "output format")
-	open := flag.Bool("o", false, "open in browser (geojson.io)")
+	inputFormat := flag.String("input", "any", "input format")
+	outputFormat := flag.String("output", "all", "output format")
+	open := flag.Bool("show", false, "show in browser (geojson.io)")
 	flag.Parse()
 
 	input, err := ioutil.ReadAll(os.Stdin)
