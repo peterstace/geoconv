@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,31 +9,35 @@ import (
 	"github.com/peterstace/simplefeatures/geom"
 )
 
-func decodeInput(input []byte, format string) (geom.Geometry, error) {
+func decodeInput(input []byte, format string, disableValidation bool) (geom.Geometry, error) {
+	var opts []geom.ConstructorOption
+	if disableValidation {
+		opts = []geom.ConstructorOption{geom.DisableAllValidations}
+	}
 	switch format {
 	case "any":
-		return decodeUsingAny(input)
+		return decodeUsingAny(input, opts)
 	case "wkt":
-		return decodeUsingWKT(input)
+		return decodeUsingWKT(input, opts)
 	case "geojson":
-		return decodeUsingGeoJSON(input)
+		return decodeUsingGeoJSON(input, opts)
 	case "lonlat":
-		return decodeUsingLonLat(input)
+		return decodeUsingLonLat(input, opts)
 	case "tile":
-		return decodeUsingTile(input)
+		return decodeUsingTile(input, opts)
 	default:
 		return geom.Geometry{}, fmt.Errorf("unknown geometry format: %v", format)
 	}
 }
 
-func decodeUsingAny(input []byte) (geom.Geometry, error) {
-	for _, fn := range []func([]byte) (geom.Geometry, error){
+func decodeUsingAny(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+	for _, fn := range []func([]byte, []geom.ConstructorOption) (geom.Geometry, error){
 		decodeUsingWKT,
 		decodeUsingGeoJSON,
 		decodeUsingLonLat,
 		decodeUsingTile,
 	} {
-		g, err := fn(input)
+		g, err := fn(input, opts)
 		if err != nil {
 			continue // try the next format
 		}
@@ -44,21 +46,19 @@ func decodeUsingAny(input []byte) (geom.Geometry, error) {
 	return geom.Geometry{}, errors.New("could not parse using any format")
 }
 
-func decodeUsingWKT(input []byte) (geom.Geometry, error) {
+func decodeUsingWKT(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
 	// TODO: If we could detect _geometry validation_ errors here, we could
 	// bubble them up rather than using wrongFormatErr.
-	return geom.UnmarshalWKT(string(input))
+	return geom.UnmarshalWKT(string(input), opts...)
 }
 
-func decodeUsingGeoJSON(input []byte) (geom.Geometry, error) {
+func decodeUsingGeoJSON(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
 	// TODO: If we could detect _geometry validation_ errors here, we could
 	// bubble them up rather than using wrongFormatErr.
-	var g geom.Geometry
-	err := json.NewDecoder(bytes.NewReader(input)).Decode(&g)
-	return g, err
+	return geom.UnmarshalGeoJSON(input, opts...)
 }
 
-func decodeUsingLonLat(input []byte) (geom.Geometry, error) {
+func decodeUsingLonLat(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
 	parts := strings.Split(string(input), " ")
 	if len(parts) != 2 {
 		parts = strings.Split(string(input), ",")
@@ -80,7 +80,7 @@ func decodeUsingLonLat(input []byte) (geom.Geometry, error) {
 	return geom.NewPointFromXY(geom.XY{X: x, Y: y}).AsGeometry(), nil
 }
 
-func decodeUsingTile(input []byte) (geom.Geometry, error) {
+func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
 	parts := strings.Split(string(input), " ")
 	if len(parts) != 3 {
 		parts = strings.Split(string(input), "/")
