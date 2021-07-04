@@ -25,3 +25,5 @@ github.com/peterstace/simplefeatures v0.27.0 h1:fx7ulXqRswOJ+ihGyKtCrKHJPEVTcWyG
 github.com/peterstace/simplefeatures v0.27.0/go.mod h1:E4tFQfvVfIznGAUgYwBq/zlFekolHqGZk2yvh6je/bM=
 github.com/peterstace/simplefeatures v0.28.1 h1:/bgme1s5rYeSOXzQ+AYhT7yzmeUI5y+VHQDfMJvBgiw=
 github.com/peterstace/simplefeatures v0.28.1/go.mod h1:E4tFQfvVfIznGAUgYwBq/zlFekolHqGZk2yvh6je/bM=
+github.com/peterstace/simplefeatures v0.29.0 h1:WufAhwROQ5erBcC7qLaNpfQIlqX3epV3tyQigsuVqG4=
+github.com/peterstace/simplefeatures v0.29.0/go.mod h1:E4tFQfvVfIznGAUgYwBq/zlFekolHqGZk2yvh6je/bM=
