@@ -25,6 +25,8 @@ func decodeInput(input []byte, format string, disableValidation bool) (geom.Geom
 		return decodeUsingLonLat(input, opts)
 	case "tile":
 		return decodeUsingTile(input, opts)
+	case "seq":
+		return decodeUsingSeq(input, opts)
 	default:
 		return geom.Geometry{}, fmt.Errorf("unknown geometry format: %v", format)
 	}
@@ -36,6 +38,7 @@ func decodeUsingAny(input []byte, opts []geom.ConstructorOption) (geom.Geometry,
 		decodeUsingGeoJSON,
 		decodeUsingLonLat,
 		decodeUsingTile,
+		decodeUsingSeq,
 	} {
 		g, err := fn(input, opts)
 		if err != nil {
@@ -100,6 +103,40 @@ func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry
 	}
 
 	return Tile{z, x, y}.AsEnvelope().AsGeometry(), nil
+}
+
+func decodeUsingSeq(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+	parts := strings.Split(string(input), ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	floats := make([]float64, len(parts))
+	for i, str := range parts {
+		var err error
+		floats[i], err = strconv.ParseFloat(str, 64)
+		if err != nil {
+			return geom.Geometry{}, err
+		}
+	}
+
+	if len(floats)%2 != 0 {
+		return geom.Geometry{}, fmt.Errorf("number of items in sequence must be even")
+	}
+	seq := geom.NewSequence(floats, geom.DimXY)
+	switch seq.Length() {
+	case 0:
+		return geom.Geometry{}, fmt.Errorf("no items in sequence")
+	case 1:
+		return geom.NewPointFromXY(seq.GetXY(0), opts...).AsGeometry(), nil
+	default:
+		ring, err := geom.NewLineString(seq, opts...)
+		if err != nil {
+			return geom.Geometry{}, err
+		}
+		poly, err := geom.NewPolygonFromRings([]geom.LineString{ring}, opts...)
+		return poly.AsGeometry(), err
+	}
 }
 
 func coalesce(errs ...error) error {
