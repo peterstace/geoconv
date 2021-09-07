@@ -80,7 +80,8 @@ func decodeUsingLonLat(input []byte, opts []geom.ConstructorOption) (geom.Geomet
 	if err != nil {
 		return geom.Geometry{}, err
 	}
-	return geom.NewPointFromXY(geom.XY{X: x, Y: y}).AsGeometry(), nil
+	pt, err := geom.XY{X: x, Y: y}.AsPoint()
+	return pt.AsGeometry(), err
 }
 
 func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
@@ -102,7 +103,8 @@ func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry
 		return geom.Geometry{}, err
 	}
 
-	return Tile{z, x, y}.AsEnvelope().AsGeometry(), nil
+	env, err := Tile{z, x, y}.AsEnvelope()
+	return env.AsGeometry(), err
 }
 
 func decodeUsingSeq(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
@@ -128,13 +130,14 @@ func decodeUsingSeq(input []byte, opts []geom.ConstructorOption) (geom.Geometry,
 	case 0:
 		return geom.Geometry{}, fmt.Errorf("no items in sequence")
 	case 1:
-		return geom.NewPointFromXY(seq.GetXY(0), opts...).AsGeometry(), nil
+		pt, err := seq.GetXY(0).AsPoint(opts...)
+		return pt.AsGeometry(), err
 	default:
 		ring, err := geom.NewLineString(seq, opts...)
 		if err != nil {
 			return geom.Geometry{}, err
 		}
-		poly, err := geom.NewPolygonFromRings([]geom.LineString{ring}, opts...)
+		poly, err := geom.NewPolygon([]geom.LineString{ring}, opts...)
 		return poly.AsGeometry(), err
 	}
 }
