@@ -41,7 +41,7 @@ func TestDecodeInput(t *testing.T) {
 		{"21 1929379 1258703", "tile", false},
 	} {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			_, err := decodeInput([]byte(tt.input), tt.format)
+			_, err := decodeInput([]byte(tt.input), tt.format, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("wantErr: %v, err: %v", tt.wantErr, err)
 			}

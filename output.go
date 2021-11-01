@@ -18,8 +18,7 @@ func output(g geom.Geometry, outputFormat string) {
 	case "geojson":
 		json.NewEncoder(os.Stdout).Encode(g)
 	case "seq":
-		if g.IsPolygon() {
-			poly := g.AsPolygon()
+		if poly, ok := g.AsPolygon(); ok {
 			seqs := []geom.Sequence{poly.ExteriorRing().Coordinates()}
 			for i := 0; i < poly.NumInteriorRings(); i++ {
 				seqs = append(seqs, poly.InteriorRingN(i).Coordinates())
@@ -46,8 +45,8 @@ func output(g geom.Geometry, outputFormat string) {
 		json.NewEncoder(os.Stdout).Encode(g)
 		fmt.Println()
 
-		if g.IsPolygon() && g.AsPolygon().NumInteriorRings() == 0 {
-			seq := g.AsPolygon().ExteriorRing().Coordinates()
+		if poly, ok := g.AsPolygon(); ok && poly.NumInteriorRings() == 0 {
+			seq := poly.ExteriorRing().Coordinates()
 			var coords []string
 			for i := 0; i < seq.Length(); i++ {
 				xy := seq.GetXY(i)
