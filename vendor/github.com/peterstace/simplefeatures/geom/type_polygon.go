@@ -269,7 +269,7 @@ func (p Polygon) Value() (driver.Value, error) {
 // slice and then UnmarshalWKB called manually (passing in the
 // ConstructionOptions as desired).
 func (p *Polygon) Scan(src interface{}) error {
-	return scanAsType(src, p, TypePolygon)
+	return scanAsType(src, p)
 }
 
 // AsBinary returns the WKB (Well Known Text) representation of the geometry.
@@ -280,7 +280,7 @@ func (p Polygon) AsBinary() []byte {
 // AppendWKB appends the WKB (Well Known Text) representation of the geometry
 // to the input slice.
 func (p Polygon) AppendWKB(dst []byte) []byte {
-	marsh := newWKBMarshaller(dst)
+	marsh := newWKBMarshaler(dst)
 	marsh.writeByteOrder()
 	marsh.writeGeomType(TypePolygon, p.ctype)
 	marsh.writeCount(len(p.rings))
@@ -297,7 +297,7 @@ func (p Polygon) ConvexHull() Geometry {
 	return convexHull(p.AsGeometry())
 }
 
-// MarshalJSON implements the encoding/json.Marshaller interface by encoding
+// MarshalJSON implements the encoding/json.Marshaler interface by encoding
 // this geometry as a GeoJSON geometry object.
 func (p Polygon) MarshalJSON() ([]byte, error) {
 	var dst []byte
@@ -305,6 +305,12 @@ func (p Polygon) MarshalJSON() ([]byte, error) {
 	dst = appendGeoJSONSequences(dst, p.Coordinates())
 	dst = append(dst, '}')
 	return dst, nil
+}
+
+// UnmarshalJSON implements the encoding/json.Unmarshaler interface by decoding
+// the GeoJSON representation of a Polygon.
+func (p *Polygon) UnmarshalJSON(buf []byte) error {
+	return unmarshalGeoJSONAsType(buf, p)
 }
 
 // Coordinates returns the coordinates of the rings making up the Polygon
@@ -585,4 +591,41 @@ func (p Polygon) Summary() string {
 // String returns the string representation of the Polygon.
 func (p Polygon) String() string {
 	return p.Summary()
+}
+
+// Simplify returns a simplified version of the Polygon by applying the
+// Ramer-Douglas-Peucker algorithm to each constituent ring. If the exterior
+// ring collapses to a point or single linear element, the empty Polygon is
+// returned. If any interior ring collapses to a point or a single linear
+// element, then it is omitted from the final output. The output Polygon will
+// be invalid if any rings in the input become non-rings (e.g. via self
+// intersection) in the output, or if any two rings were to interact in ways
+// prohibited by Polygon validation rules (such as intersecting at more than
+// one point). In these cases, an error is returned. Construction behaviour of
+// the output (which includes omitting errors) may be controlled via
+// ConstructorOptions.
+func (p Polygon) Simplify(threshold float64, opts ...ConstructorOption) (Polygon, error) {
+	exterior := p.ExteriorRing().Simplify(threshold)
+
+	// If we don't have at least 4 coordinates, then we can't form a ring, and
+	// the polygon has collapsed either to a point or a single linear element.
+	// Both cases are represented by an empty Polygon.
+	hasCollapsed := func(ring LineString) bool {
+		return ring.Coordinates().Length() < 4
+	}
+	if hasCollapsed(exterior) {
+		return Polygon{}, nil
+	}
+
+	n := p.NumInteriorRings()
+	rings := make([]LineString, 0, n+1)
+	rings = append(rings, exterior)
+	for i := 0; i < n; i++ {
+		interior := p.InteriorRingN(i).Simplify(threshold)
+		if !hasCollapsed(interior) {
+			rings = append(rings, interior)
+		}
+	}
+	simpl, err := NewPolygon(rings, opts...)
+	return simpl, wrapSimplified(err)
 }

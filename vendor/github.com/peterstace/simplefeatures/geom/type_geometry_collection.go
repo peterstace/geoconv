@@ -166,7 +166,7 @@ func (c GeometryCollection) Value() (driver.Value, error) {
 // slice and then UnmarshalWKB called manually (passing in the
 // ConstructionOptions as desired).
 func (c *GeometryCollection) Scan(src interface{}) error {
-	return scanAsType(src, c, TypeGeometryCollection)
+	return scanAsType(src, c)
 }
 
 // AsBinary returns the WKB (Well Known Text) representation of the geometry.
@@ -177,7 +177,7 @@ func (c GeometryCollection) AsBinary() []byte {
 // AppendWKB appends the WKB (Well Known Text) representation of the geometry
 // to the input slice.
 func (c GeometryCollection) AppendWKB(dst []byte) []byte {
-	marsh := newWKBMarshaller(dst)
+	marsh := newWKBMarshaler(dst)
 	marsh.writeByteOrder()
 	marsh.writeGeomType(TypeGeometryCollection, c.ctype)
 	n := c.NumGeometries()
@@ -195,7 +195,7 @@ func (c GeometryCollection) ConvexHull() Geometry {
 	return convexHull(c.AsGeometry())
 }
 
-// MarshalJSON implements the encoding/json.Marshaller interface by encoding
+// MarshalJSON implements the encoding/json.Marshaler interface by encoding
 // this geometry as a GeoJSON geometry object.
 func (c GeometryCollection) MarshalJSON() ([]byte, error) {
 	buf := []byte(`{"type":"GeometryCollection","geometries":`)
@@ -210,6 +210,12 @@ func (c GeometryCollection) MarshalJSON() ([]byte, error) {
 	buf = append(buf, geomsJSON...)
 	buf = append(buf, '}')
 	return buf, nil
+}
+
+// UnmarshalJSON implements the encoding/json.Unmarshaler interface by decoding
+// the GeoJSON representation of a GeometryCollection.
+func (c *GeometryCollection) UnmarshalJSON(buf []byte) error {
+	return unmarshalGeoJSONAsType(buf, c)
 }
 
 // TransformXY transforms this GeometryCollection into another GeometryCollection according to fn.
@@ -489,4 +495,20 @@ func (c GeometryCollection) Summary() string {
 // String returns the string representation of the GeometryCollection.
 func (c GeometryCollection) String() string {
 	return c.Summary()
+}
+
+// Simplify returns a simplified version of the GeometryCollection by applying
+// Simplify to each child geometry. Any supplied ConstructorOptions will be
+// used when simplifying each child geometry.
+func (c GeometryCollection) Simplify(threshold float64, opts ...ConstructorOption) (GeometryCollection, error) {
+	n := c.NumGeometries()
+	geoms := make([]Geometry, n)
+	for i := 0; i < n; i++ {
+		var err error
+		geoms[i], err = c.GeometryN(i).Simplify(threshold, opts...)
+		if err != nil {
+			return GeometryCollection{}, wrapSimplified(err)
+		}
+	}
+	return NewGeometryCollection(geoms, opts...), nil
 }
