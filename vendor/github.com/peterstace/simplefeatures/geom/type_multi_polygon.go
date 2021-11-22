@@ -275,7 +275,7 @@ func (m MultiPolygon) Value() (driver.Value, error) {
 // slice and then UnmarshalWKB called manually (passing in the
 // ConstructionOptions as desired).
 func (m *MultiPolygon) Scan(src interface{}) error {
-	return scanAsType(src, m, TypeMultiPolygon)
+	return scanAsType(src, m)
 }
 
 // AsBinary returns the WKB (Well Known Text) representation of the geometry.
@@ -286,7 +286,7 @@ func (m MultiPolygon) AsBinary() []byte {
 // AppendWKB appends the WKB (Well Known Text) representation of the geometry
 // to the input slice.
 func (m MultiPolygon) AppendWKB(dst []byte) []byte {
-	marsh := newWKBMarshaller(dst)
+	marsh := newWKBMarshaler(dst)
 	marsh.writeByteOrder()
 	marsh.writeGeomType(TypeMultiPolygon, m.ctype)
 	n := m.NumPolygons()
@@ -304,7 +304,7 @@ func (m MultiPolygon) ConvexHull() Geometry {
 	return convexHull(m.AsGeometry())
 }
 
-// MarshalJSON implements the encoding/json.Marshaller interface by encoding
+// MarshalJSON implements the encoding/json.Marshaler interface by encoding
 // this geometry as a GeoJSON geometry object.
 func (m MultiPolygon) MarshalJSON() ([]byte, error) {
 	var dst []byte
@@ -312,6 +312,12 @@ func (m MultiPolygon) MarshalJSON() ([]byte, error) {
 	dst = appendGeoJSONSequenceMatrix(dst, m.Coordinates())
 	dst = append(dst, '}')
 	return dst, nil
+}
+
+// UnmarshalJSON implements the encoding/json.Unmarshaler interface by decoding
+// the GeoJSON representation of a MultiPolygon.
+func (m *MultiPolygon) UnmarshalJSON(buf []byte) error {
+	return unmarshalGeoJSONAsType(buf, m)
 }
 
 // Coordinates returns the coordinates of each constituent Polygon of the
@@ -512,4 +518,24 @@ func (m MultiPolygon) Summary() string {
 // String returns the string representation of the MultiPolygon.
 func (m MultiPolygon) String() string {
 	return m.Summary()
+}
+
+// Simplify returns a simplified version of the MultiPolygon by applying
+// Simplify to each child Polygon and constructing a new MultiPolygon from the
+// result. Any supplied ConstructorOptions will be used when simplifying each
+// child Polygon, or constructing the final MultiPolygon output.
+func (m MultiPolygon) Simplify(threshold float64, opts ...ConstructorOption) (MultiPolygon, error) {
+	n := m.NumPolygons()
+	polys := make([]Polygon, 0, n)
+	for i := 0; i < n; i++ {
+		poly, err := m.PolygonN(i).Simplify(threshold, opts...)
+		if err != nil {
+			return MultiPolygon{}, err
+		}
+		if !poly.IsEmpty() {
+			polys = append(polys, poly)
+		}
+	}
+	simpl, err := NewMultiPolygon(polys, opts...)
+	return simpl, wrapSimplified(err)
 }

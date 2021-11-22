@@ -247,7 +247,7 @@ func (g Geometry) AsText() string {
 	}
 }
 
-// MarshalJSON implements the encoding/json.Marshaller interface by encoding
+// MarshalJSON implements the encoding/json.Marshaler interface by encoding
 // this geometry as a GeoJSON geometry object.
 func (g Geometry) MarshalJSON() ([]byte, error) {
 	switch g.gtype {
@@ -283,6 +283,22 @@ func (g *Geometry) UnmarshalJSON(p []byte) error {
 		return err
 	}
 	*g = geom
+	return nil
+}
+
+// unmarshalGeoJSONAsType unmarshals GeoJSON directly into the concrete
+// geometry specified by dst (which should be a pointer to the concrete
+// geometry type).
+func unmarshalGeoJSONAsType(p []byte, dst interface{}) error {
+	g, err := UnmarshalGeoJSON(p)
+	if err != nil {
+		return err
+	}
+	dstType := dst.(interface{ Type() GeometryType }).Type()
+	if g.Type() != dstType {
+		return fmt.Errorf("cannot unmarshal GeoJSON of type %s into %s", g.Type(), dstType)
+	}
+	assignToConcrete(dst, g)
 	return nil
 }
 
@@ -377,15 +393,24 @@ func (g *Geometry) Scan(src interface{}) error {
 // geometry types. The src should be the input to Scan, typ should be the
 // concrete geometry type, and dst should be a pointer to the concrete geometry
 // to update (e.g. *LineString).
-func scanAsType(src interface{}, dst interface{}, typ GeometryType) error {
+func scanAsType(src interface{}, dst interface{}) error {
 	var g Geometry
 	if err := g.Scan(src); err != nil {
 		return err
 	}
-	if g.Type() != typ {
-		return fmt.Errorf("scanned geometry is a %s rather than a %s", g.Type(), typ)
+	dstType := dst.(interface{ Type() GeometryType }).Type()
+	if g.Type() != dstType {
+		return fmt.Errorf("scanned geometry is a %s rather than a %s", g.Type(), dstType)
 	}
-	switch typ {
+	assignToConcrete(dst, g)
+	return nil
+}
+
+// assignToConcrete assigns the geometry stored in g to the concrete geometry
+// pointed to by dst (i.e. dst must be a pointer to a concrete geometry). It
+// panics if the type of dst doesn't match the geometry stored in g.
+func assignToConcrete(dst interface{}, g Geometry) {
+	switch g.Type() {
 	case TypeGeometryCollection:
 		*dst.(*GeometryCollection) = g.MustAsGeometryCollection()
 	case TypePoint:
@@ -401,9 +426,8 @@ func scanAsType(src interface{}, dst interface{}, typ GeometryType) error {
 	case TypeMultiPolygon:
 		*dst.(*MultiPolygon) = g.MustAsMultiPolygon()
 	default:
-		panic("unknown geometry type: " + typ.String())
+		panic("unknown geometry type: " + g.Type().String())
 	}
-	return nil
 }
 
 // Dimension returns the dimension of the Geometry. This is  0 for Points and
@@ -883,4 +907,34 @@ func (g Geometry) Summary() string {
 // String returns the string representation of the Geometry.
 func (g Geometry) String() string {
 	return g.Summary()
+}
+
+// Simplify returns a simplified version of the geometry using the
+// Ramer-Douglas-Peucker algorithm. Sometimes a simplified geometry can become
+// invalid, in which case an error is returned rather than attempting to fix
+// the geometry. Validation of the result can be skipped by making use of the
+// geometry constructor options.
+func (g Geometry) Simplify(threshold float64, opts ...ConstructorOption) (Geometry, error) {
+	switch g.gtype {
+	case TypeGeometryCollection:
+		c, err := g.MustAsGeometryCollection().Simplify(threshold, opts...)
+		return c.AsGeometry(), err
+	case TypePoint:
+		return g, nil
+	case TypeLineString:
+		c := g.MustAsLineString().Simplify(threshold)
+		return c.AsGeometry(), nil
+	case TypePolygon:
+		c, err := g.MustAsPolygon().Simplify(threshold, opts...)
+		return c.AsGeometry(), err
+	case TypeMultiPoint:
+		return g, nil
+	case TypeMultiLineString:
+		return g.MustAsMultiLineString().Simplify(threshold).AsGeometry(), nil
+	case TypeMultiPolygon:
+		c, err := g.MustAsMultiPolygon().Simplify(threshold, opts...)
+		return c.AsGeometry(), err
+	default:
+		panic("unknown type: " + g.Type().String())
+	}
 }
