@@ -16,6 +16,7 @@ func main() {
 	outputFormat := flag.String("output", "all", "output format")
 	disableValidation := flag.Bool("disable-validation", false, "disable validation")
 	outputPrecisionStr := flag.String("dp", "", "output precision, an integer number of decimal places")
+	boundingBox := flag.Bool("bbox", false, "output bounding box instead of original geometry")
 	open := flag.Bool("show", false, "show in browser (geojson.io)")
 	flag.Parse()
 
@@ -27,6 +28,9 @@ func main() {
 	inputGeom, err := decodeInput(input, *inputFormat, *disableValidation)
 	if err != nil {
 		log.Fatalf("decoding input: %v", err)
+	}
+	if *boundingBox {
+		inputGeom = inputGeom.Envelope().AsGeometry()
 	}
 
 	if *outputPrecisionStr != "" {
