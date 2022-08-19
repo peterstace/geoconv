@@ -26,9 +26,17 @@ func openInBrowser(g geom.Geometry) error {
 	}
 
 	log.Printf("opening: %v", u.String())
-	out, err := exec.Command("open", u.String()).CombinedOutput()
+	out, err := exec.Command(openCommand(), u.String()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %v", err, string(out))
 	}
 	return nil
+}
+
+func openCommand() string {
+	const xdg = "xdg-open"
+	if _, err := exec.LookPath(xdg); err == nil {
+		return xdg
+	}
+	return "open"
 }
