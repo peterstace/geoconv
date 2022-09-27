@@ -436,6 +436,9 @@ func (m MultiPolygon) PointOnSurface() Point {
 // clockwise orientation and any inner rings in a counter-clockwise
 // orientation.
 func (m MultiPolygon) ForceCW() MultiPolygon {
+	if m.IsCW() {
+		return m
+	}
 	return m.forceOrientation(true)
 }
 
@@ -443,6 +446,9 @@ func (m MultiPolygon) ForceCW() MultiPolygon {
 // a counter-clockwise orientation and any inner rings in a clockwise
 // orientation.
 func (m MultiPolygon) ForceCCW() MultiPolygon {
+	if m.IsCCW() {
+		return m
+	}
 	return m.forceOrientation(false)
 }
 
@@ -452,6 +458,28 @@ func (m MultiPolygon) forceOrientation(forceCW bool) MultiPolygon {
 		polys[i] = poly.forceOrientation(forceCW)
 	}
 	return MultiPolygon{polys, m.ctype}
+}
+
+// IsCW returns true iff all contained polygons are CW.
+// An empty multipolygon returns true.
+func (m MultiPolygon) IsCW() bool {
+	for _, poly := range m.polys {
+		if !poly.IsCW() {
+			return false
+		}
+	}
+	return true
+}
+
+// IsCCW returns true iff all contained polygons are CCW.
+// An empty multipolygon returns true.
+func (m MultiPolygon) IsCCW() bool {
+	for _, poly := range m.polys {
+		if !poly.IsCCW() {
+			return false
+		}
+	}
+	return true
 }
 
 func (m MultiPolygon) controlPoints() int {
