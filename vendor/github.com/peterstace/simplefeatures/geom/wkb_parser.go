@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"reflect"
 	"unsafe"
 )
 
@@ -21,7 +20,8 @@ func UnmarshalWKB(wkb []byte, opts ...ConstructorOption) (Geometry, error) {
 
 type wkbParser struct {
 	body []byte
-	bo   binary.ByteOrder
+	bo   byte
+	no   bool
 	opts []ConstructorOption
 }
 
@@ -51,12 +51,13 @@ func (p *wkbParser) parseByteOrder() error {
 	if err != nil {
 		return err
 	}
+	p.bo = b
 	switch b {
 	case 0:
-		p.bo = binary.BigEndian
+		p.no = (nativeOrder == binary.BigEndian)
 		return nil
 	case 1:
-		p.bo = binary.LittleEndian
+		p.no = (nativeOrder == binary.LittleEndian)
 		return nil
 	default:
 		return wkbSyntaxError{fmt.Sprintf("invalid byte order: %#x", b)}
@@ -76,7 +77,14 @@ func (p *wkbParser) parseUint32() (uint32, error) {
 	if len(p.body) < 4 {
 		return 0, wkbSyntaxError{"unexpected EOF"}
 	}
-	x := p.bo.Uint32(p.body)
+
+	var x uint32
+	if p.bo == 0 {
+		x = binary.BigEndian.Uint32(p.body)
+	} else {
+		x = binary.LittleEndian.Uint32(p.body)
+	}
+
 	p.body = p.body[4:]
 	return x, nil
 }
@@ -155,7 +163,14 @@ func (p *wkbParser) parseFloat64() (float64, error) {
 	if len(p.body) < 8 {
 		return 0, wkbSyntaxError{"unexpected EOF"}
 	}
-	u := p.bo.Uint64(p.body)
+
+	var u uint64
+	if p.bo == 0 {
+		u = binary.BigEndian.Uint64(p.body)
+	} else {
+		u = binary.LittleEndian.Uint64(p.body)
+	}
+
 	p.body = p.body[8:]
 	return math.Float64frombits(u), nil
 }
@@ -207,7 +222,7 @@ func (p *wkbParser) parseLineString(ctype CoordinatesType) (LineString, error) {
 	}
 
 	var seqData []byte
-	if p.bo == nativeOrder {
+	if p.no {
 		seqData = p.body[:8*len(floats)]
 	} else {
 		seqData = make([]byte, 8*len(floats))
@@ -224,12 +239,10 @@ func (p *wkbParser) parseLineString(ctype CoordinatesType) (LineString, error) {
 // bytesAsFloats reinterprets the bytes slice as a float64 slice in a similar
 // manner to reinterpret_cast in C++.
 func bytesAsFloats(byts []byte) []float64 {
-	var floats []float64
-	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&floats))
-	hdr.Data = (*reflect.SliceHeader)(unsafe.Pointer(&byts)).Data
-	hdr.Len = len(byts) / 8
-	hdr.Cap = cap(byts) / 8
-	return floats
+	if len(byts) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*float64)(unsafe.Pointer(&byts[0])), len(byts)/8)
 }
 
 // flipEndianessStride8 flips the endianess of the input bytes, assuming that

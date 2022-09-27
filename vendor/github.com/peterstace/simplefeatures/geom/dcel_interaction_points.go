@@ -5,10 +5,10 @@ package geom
 //
 // Assumptions:
 //
-// - Input geometries are correctly noded with respect to each other.
+// 1. Input geometries are correctly noded with respect to each other.
 //
-// - Input geometries don't have any repeated coordinates (e.g. in areal rings
-//   or linear elements).
+// 2. Input geometries don't have any repeated coordinates (e.g. in areal rings
+// or linear elements).
 func findInteractionPoints(gs []Geometry) map[XY]struct{} {
 	var sizeHint int
 	for _, g := range gs {
@@ -50,7 +50,7 @@ func addGeometryInteractions(g Geometry, adjacents map[XY]xyPair, interactions m
 	case TypeMultiPolygon:
 		addMultiLineStringInteractions(g.MustAsMultiPolygon().Boundary(), adjacents, interactions)
 	case TypeGeometryCollection:
-		panic("geometry collection not supported")
+		addGeometryCollectionInteractions(g.MustAsGeometryCollection(), adjacents, interactions)
 	default:
 		panic("unknown geometry: " + g.Type().String())
 	}
@@ -115,5 +115,13 @@ func addMultiPointInteractions(mp MultiPoint, interactions map[XY]struct{}) {
 		if ok {
 			interactions[xy] = struct{}{}
 		}
+	}
+}
+
+func addGeometryCollectionInteractions(gc GeometryCollection, adjacents map[XY]xyPair, interactions map[XY]struct{}) {
+	n := gc.NumGeometries()
+	for i := 0; i < n; i++ {
+		g := gc.GeometryN(i)
+		addGeometryInteractions(g, adjacents, interactions)
 	}
 }

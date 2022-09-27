@@ -765,6 +765,9 @@ func (g Geometry) PointOnSurface() Point {
 // clockwise orientation and any inner rings in a counter-clockwise
 // orientation. Non-areal geometrys are returned as is.
 func (g Geometry) ForceCW() Geometry {
+	if g.IsCW() {
+		return g
+	}
 	return g.forceOrientation(true)
 }
 
@@ -772,6 +775,9 @@ func (g Geometry) ForceCW() Geometry {
 // counter-clockwise orientation and any inner rings in a clockwise
 // orientation. Non-areal geometrys are returned as is.
 func (g Geometry) ForceCCW() Geometry {
+	if g.IsCCW() {
+		return g
+	}
 	return g.forceOrientation(false)
 }
 
@@ -785,6 +791,36 @@ func (g Geometry) forceOrientation(forceCW bool) Geometry {
 		return g.MustAsGeometryCollection().forceOrientation(forceCW).AsGeometry()
 	default:
 		return g
+	}
+}
+
+// IsCW returns true iff the underlying geometry is CW.
+// For geometries (such as points) where this is undefined, return true.
+func (g Geometry) IsCW() bool {
+	switch g.gtype {
+	case TypePolygon:
+		return g.MustAsPolygon().IsCW()
+	case TypeMultiPolygon:
+		return g.MustAsMultiPolygon().IsCW()
+	case TypeGeometryCollection:
+		return g.MustAsGeometryCollection().IsCW()
+	default:
+		return true
+	}
+}
+
+// IsCCW returns true iff the underlying geometry is CCW.
+// For geometries (such as points) where this is undefined, return true.
+func (g Geometry) IsCCW() bool {
+	switch g.gtype {
+	case TypePolygon:
+		return g.MustAsPolygon().IsCCW()
+	case TypeMultiPolygon:
+		return g.MustAsMultiPolygon().IsCCW()
+	case TypeGeometryCollection:
+		return g.MustAsGeometryCollection().IsCCW()
+	default:
+		return true
 	}
 }
 

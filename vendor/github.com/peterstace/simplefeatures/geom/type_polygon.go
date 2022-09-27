@@ -24,7 +24,6 @@ import (
 // 3. The interior of the polygon must be connected.
 //
 // 4. The holes must be fully inside the outer ring.
-//
 type Polygon struct {
 	rings []LineString
 	ctype CoordinatesType
@@ -51,7 +50,7 @@ func NewPolygon(rings []LineString, opts ...ConstructorOption) (Polygon, error) 
 	ctorOpts := newOptionSet(opts)
 	if err := validatePolygon(rings, ctorOpts); err != nil {
 		if ctorOpts.omitInvalid {
-			return Polygon{}, nil
+			return Polygon{}.ForceCoordinatesType(ctype), nil
 		}
 		return Polygon{}, err
 	}
@@ -398,13 +397,22 @@ func signedAreaOfLinearRing(lr LineString, transform func(XY) XY) float64 {
 	var sum float64
 	seq := lr.Coordinates()
 	n := seq.Length()
-	for i := 0; i < n; i++ {
-		pt0 := seq.GetXY(i)
-		pt1 := seq.GetXY((i + 1) % n)
+	if n == 0 {
+		return 0
+	}
+
+	nthPt := func(i int) XY {
+		pt := seq.GetXY(i)
 		if transform != nil {
-			pt0 = transform(pt0)
-			pt1 = transform(pt1)
+			pt = transform(pt)
 		}
+		return pt
+	}
+
+	pt1 := nthPt(0)
+	for i := 0; i < n-1; i++ {
+		pt0 := pt1
+		pt1 = nthPt(i + 1)
 		sum += (pt1.X + pt0.X) * (pt1.Y - pt0.Y)
 	}
 	return sum / 2
@@ -527,6 +535,9 @@ func (p Polygon) PointOnSurface() Point {
 // clockwise orientation and any inner rings in a counter-clockwise
 // orientation.
 func (p Polygon) ForceCW() Polygon {
+	if p.IsCW() {
+		return p
+	}
 	return p.forceOrientation(true)
 }
 
@@ -534,6 +545,9 @@ func (p Polygon) ForceCW() Polygon {
 // counter-clockwise orientation and any inner rings in a clockwise
 // orientation.
 func (p Polygon) ForceCCW() Polygon {
+	if p.IsCCW() {
+		return p
+	}
 	return p.forceOrientation(false)
 }
 
@@ -548,6 +562,36 @@ func (p Polygon) forceOrientation(forceCW bool) Polygon {
 		}
 	}
 	return Polygon{orientedRings, p.ctype}
+}
+
+// IsCW returns true iff the outer ring is CW and all inner rings are CCW.
+// Any linear ring with a negative signed area is assumed to be CW.
+// Any linear ring with a positive signed area is assumed to be CCW.
+// Any linear ring of zero area is assumed to be neither CW nor CCW.
+// An empty polygon returns true.
+func (p Polygon) IsCW() bool {
+	for i, ring := range p.rings {
+		isCW := signedAreaOfLinearRing(ring, nil) < 0
+		if (i == 0) != isCW {
+			return false
+		}
+	}
+	return true
+}
+
+// IsCCW returns true iff the outer ring is CCW and all inner rings are CW.
+// Any linear ring with a negative signed area is assumed to be CW.
+// Any linear ring with a positive signed area is assumed to be CCW.
+// Any linear ring of zero area is assumed to be neither CW nor CCW.
+// An empty polygon returns true.
+func (p Polygon) IsCCW() bool {
+	for i, ring := range p.rings {
+		isCCW := signedAreaOfLinearRing(ring, nil) > 0
+		if (i == 0) != isCCW {
+			return false
+		}
+	}
+	return true
 }
 
 func (p Polygon) controlPoints() int {
@@ -573,6 +617,15 @@ func (p Polygon) DumpCoordinates() Sequence {
 	seq := NewSequence(coords, ctype)
 	seq.assertNoUnusedCapacity()
 	return seq
+}
+
+// DumpRings returns a copy of the Polygon's rings as a slice of LineStrings.
+// If the Polygon is empty, then the slice will have length zero. Otherwise,
+// the slice will consist of the exterior ring, followed by any interior rings.
+func (p Polygon) DumpRings() []LineString {
+	tmp := make([]LineString, len(p.rings))
+	copy(tmp, p.rings)
+	return tmp
 }
 
 // Summary returns a text summary of the Polygon following a similar format to https://postgis.net/docs/ST_Summary.html.
