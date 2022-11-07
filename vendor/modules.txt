@@ -1,3 +1,3 @@
-# github.com/peterstace/simplefeatures v0.40.0
+# github.com/peterstace/simplefeatures v0.40.1
 github.com/peterstace/simplefeatures/geom
 github.com/peterstace/simplefeatures/rtree
