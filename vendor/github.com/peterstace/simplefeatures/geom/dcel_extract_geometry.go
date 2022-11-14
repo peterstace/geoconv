@@ -1,9 +1,12 @@
 package geom
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // extractGeometry converts the DECL into a Geometry that represents it.
-func (d *doublyConnectedEdgeList) extractGeometry(include func([2]label) bool) (Geometry, error) {
+func (d *doublyConnectedEdgeList) extractGeometry(include func([2]bool) bool) (Geometry, error) {
 	areals, err := d.extractPolygons(include)
 	if err != nil {
 		return Geometry{}, err
@@ -52,12 +55,12 @@ func (d *doublyConnectedEdgeList) extractGeometry(include func([2]label) bool) (
 	}
 }
 
-func (d *doublyConnectedEdgeList) extractPolygons(include func([2]label) bool) ([]Polygon, error) {
+func (d *doublyConnectedEdgeList) extractPolygons(include func([2]bool) bool) ([]Polygon, error) {
 	var polys []Polygon
 	for _, face := range d.faces {
 		// Skip any faces not selected to be include in the output geometry, or
 		// any faces already extracted.
-		if !include(face.labels) || face.extracted {
+		if !include(face.inSet) || face.extracted {
 			continue
 		}
 
@@ -69,8 +72,7 @@ func (d *doublyConnectedEdgeList) extractPolygons(include func([2]label) bool) (
 		seen := make(map[*halfEdgeRecord]bool)
 		for f := range facesInPoly {
 			f.extracted = true
-			forEachEdge(f.cycle, func(edge *halfEdgeRecord) {
-
+			forEachEdgeInCycle(f.cycle, func(edge *halfEdgeRecord) {
 				// Mark all edges and vertices intersecting with the polygon as
 				// being extracted.  This will prevent them being considered
 				// during linear and point geometry extraction.
@@ -81,42 +83,40 @@ func (d *doublyConnectedEdgeList) extractPolygons(include func([2]label) bool) (
 				if seen[edge] {
 					return
 				}
-				if include(edge.twin.incident.labels) {
+				if include(edge.twin.incident.inSet) {
 					// Adjacent face is in the polygon, so this edge cannot be part
 					// of the boundary.
 					seen[edge] = true
 					return
 				}
-				seq := extractPolygonBoundary(facesInPoly, edge, seen)
-				ring, err := NewLineString(seq)
-				if err != nil {
-					panic(fmt.Sprintf("could not create LineString: %v", err))
-				}
+				ring := extractPolygonRing(facesInPoly, edge, seen)
 				rings = append(rings, ring)
 			})
 		}
 
 		// Construct the polygon.
-		orderCCWRingFirst(rings)
+		orderPolygonRings(rings)
 		poly, err := NewPolygon(rings)
 		if err != nil {
 			return nil, err
 		}
 		polys = append(polys, poly)
 	}
+
+	sort.Slice(polys, func(i, j int) bool {
+		seqI := polys[i].ExteriorRing().Coordinates()
+		seqJ := polys[j].ExteriorRing().Coordinates()
+		return seqI.less(seqJ)
+	})
 	return polys, nil
 }
 
-func extractPolygonBoundary(faceSet map[*faceRecord]bool, start *halfEdgeRecord, seen map[*halfEdgeRecord]bool) Sequence {
-	var coords []float64
+func extractPolygonRing(faceSet map[*faceRecord]bool, start *halfEdgeRecord, seen map[*halfEdgeRecord]bool) LineString {
+	var seqs []Sequence
 	e := start
 	for {
 		seen[e] = true
-		xy := e.origin.coords
-		coords = append(coords, xy.X, xy.Y)
-		for _, xy := range e.intermediate {
-			coords = append(coords, xy.X, xy.Y)
-		}
+		seqs = append(seqs, e.seq)
 
 		// Sweep through the edges around the vertex (in a counter-clockwise
 		// order) until we find the next edge that is part of the polygon
@@ -130,13 +130,73 @@ func extractPolygonBoundary(faceSet map[*faceRecord]bool, start *halfEdgeRecord,
 			break
 		}
 	}
+
+	// Reorder seqs such that one of them comes first in a deterministic
+	// manner. The sequences still have to form a ring, so they're rotated
+	// rather than sorted.
+	minI := 0
+	for i := range seqs {
+		if seqs[i].less(seqs[minI]) {
+			minI = i
+		}
+	}
+	rotateSeqs(seqs, len(seqs)-minI)
+
+	ring, err := NewLineString(buildRingSequence(seqs))
+	if err != nil {
+		panic(fmt.Sprintf("could not create LineString: %v", err))
+	}
+	return ring
+}
+
+func buildRingSequence(seqs []Sequence) Sequence {
+	// Calculate desired capacity.
+	var capacity int
+	for _, seq := range seqs {
+		capacity += 2 * seq.Length()
+	}
+	capacity -= 2 * len(seqs) // Account for shared point at start/end of each seq.
+	capacity += 2             // Account for repeated start/end point of ring.
+
+	// Build concatenated sequence.
+	coords := make([]float64, 0, capacity)
+	for _, seq := range seqs {
+		coords = seq.appendAllPoints(coords)
+		coords = coords[:len(coords)-2]
+	}
 	coords = append(coords, coords[:2]...)
-	return NewSequence(coords, DimXY)
+	seq := NewSequence(coords, DimXY)
+	seq.assertNoUnusedCapacity()
+	return seq
+}
+
+// rotateSeqs moves each sequence rotRight places to the right, wrapping around
+// the end of the slice to the start of the slice.
+//
+// TODO: use generics for this once we depend on Go 1.19.
+func rotateSeqs(seqs []Sequence, rotRight int) {
+	if rotRight == 0 || rotRight == len(seqs) {
+		return // Nothing to do (optimisation).
+	}
+	reverseSeqs(seqs)
+	reverseSeqs(seqs[:rotRight])
+	reverseSeqs(seqs[rotRight:])
+}
+
+// reverseSeqs reverses the order of the input slice.
+//
+// TODO: use generics for this once we depend on Go 1.19.
+func reverseSeqs(seqs []Sequence) {
+	n := len(seqs)
+	for i := 0; i < n/2; i++ {
+		j := n - i - 1
+		seqs[i], seqs[j] = seqs[j], seqs[i]
+	}
 }
 
 // findFacesMakingPolygon finds all faces that belong to the polygon that
 // contains the start face (according to the given inclusion criteria).
-func findFacesMakingPolygon(include func([2]label) bool, start *faceRecord) map[*faceRecord]bool {
+func findFacesMakingPolygon(include func([2]bool) bool, start *faceRecord) map[*faceRecord]bool {
 	expanded := make(map[*faceRecord]bool)
 	toExpand := make(map[*faceRecord]bool)
 	toExpand[start] = true
@@ -152,7 +212,7 @@ func findFacesMakingPolygon(include func([2]label) bool, start *faceRecord) map[
 		adj := adjacentFaces(popped)
 		expanded[popped] = true
 		for _, f := range adj {
-			if !include(f.labels) {
+			if !include(f.inSet) {
 				continue
 			}
 			if expanded[f] {
@@ -167,68 +227,80 @@ func findFacesMakingPolygon(include func([2]label) bool, start *faceRecord) map[
 	return expanded
 }
 
-// orderCCWRingFirst reorders rings such that if it contains at least one CCW
-// ring, then a CCW ring is the first element.
-func orderCCWRingFirst(rings []LineString) {
+// orderPolygonRings reorders rings such that the outer (CCW) ring comes first,
+// and any inner (CW) rings are ordered afterwards in a stable way.
+func orderPolygonRings(rings []LineString) {
 	for i, r := range rings {
 		if ccw := signedAreaOfLinearRing(r, nil) > 0; ccw {
 			rings[i], rings[0] = rings[0], rings[i]
-			return
+			break
 		}
 	}
+	inners := rings[1:]
+	sort.Slice(inners, func(i, j int) bool {
+		seqI := inners[i].Coordinates()
+		seqJ := inners[j].Coordinates()
+		return seqI.less(seqJ)
+	})
 }
 
-func (d *doublyConnectedEdgeList) extractLineStrings(include func([2]label) bool) ([]LineString, error) {
+func (d *doublyConnectedEdgeList) extractLineStrings(include func([2]bool) bool) ([]LineString, error) {
 	var lss []LineString
 	for _, e := range d.halfEdges {
 		if shouldExtractLine(e, include) {
+			if e.twin.seq.less(e.seq) {
+				e = e.twin // Extract in deterministic order.
+			}
 			e.extracted = true
 			e.twin.extracted = true
 			e.origin.extracted = true
 			e.twin.origin.extracted = true
 
-			coords := make([]float64, 4+2*len(e.intermediate))
-			coords[0] = e.origin.coords.X
-			coords[1] = e.origin.coords.Y
-			for i, xy := range e.intermediate {
-				coords[2+2*i] = xy.X
-				coords[3+2*i] = xy.Y
-			}
-			coords[len(coords)-2] = e.twin.origin.coords.X
-			coords[len(coords)-1] = e.twin.origin.coords.Y
-
-			seq := NewSequence(coords, DimXY)
-			ls, err := NewLineString(seq)
+			ls, err := NewLineString(e.seq)
 			if err != nil {
 				return nil, err
 			}
 			lss = append(lss, ls)
 		}
 	}
+	sort.Slice(lss, func(i, j int) bool {
+		seqI := lss[i].Coordinates()
+		seqJ := lss[j].Coordinates()
+		return seqI.less(seqJ)
+	})
 	return lss, nil
 }
 
-func shouldExtractLine(e *halfEdgeRecord, include func([2]label) bool) bool {
+func shouldExtractLine(e *halfEdgeRecord, include func([2]bool) bool) bool {
 	return !e.extracted &&
-		include(e.edgeLabels) &&
-		!include(e.incident.labels) &&
-		!include(e.twin.incident.labels)
+		include(e.inSet) &&
+		!include(e.incident.inSet) &&
+		!include(e.twin.incident.inSet)
 }
 
 // extractPoints extracts any vertices in the DCEL that should be part of the
 // output geometry, but aren't yet represented as part of any previously
 // extracted geometries.
-func (d *doublyConnectedEdgeList) extractPoints(include func([2]label) bool) ([]Point, error) {
-	var pts []Point
+func (d *doublyConnectedEdgeList) extractPoints(include func([2]bool) bool) ([]Point, error) {
+	xys := make([]XY, 0, len(d.vertices))
 	for _, vert := range d.vertices {
-		if include(vert.labels) && !vert.extracted {
+		if include(vert.inSet) && !vert.extracted {
 			vert.extracted = true
-			pt, err := vert.coords.AsPoint()
-			if err != nil {
-				return nil, err
-			}
-			pts = append(pts, pt)
+			xys = append(xys, vert.coords)
 		}
+	}
+
+	sort.Slice(xys, func(i, j int) bool {
+		return xys[i].Less(xys[j])
+	})
+
+	pts := make([]Point, 0, len(xys))
+	for _, xy := range xys {
+		pt, err := xy.AsPoint()
+		if err != nil {
+			return nil, err
+		}
+		pts = append(pts, pt)
 	}
 	return pts, nil
 }
