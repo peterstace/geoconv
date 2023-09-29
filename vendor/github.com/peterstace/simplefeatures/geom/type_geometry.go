@@ -54,26 +54,9 @@ func (t GeometryType) String() string {
 	}
 }
 
-// Type returns a string representation of the geometry's type.
+// Type returns the type of the Geometry.
 func (g Geometry) Type() GeometryType {
-	switch g.gtype {
-	case TypeGeometryCollection:
-		return g.MustAsGeometryCollection().Type()
-	case TypePoint:
-		return g.MustAsPoint().Type()
-	case TypeLineString:
-		return g.MustAsLineString().Type()
-	case TypePolygon:
-		return g.MustAsPolygon().Type()
-	case TypeMultiPoint:
-		return g.MustAsMultiPoint().Type()
-	case TypeMultiLineString:
-		return g.MustAsMultiLineString().Type()
-	case TypeMultiPolygon:
-		return g.MustAsMultiPolygon().Type()
-	default:
-		panic("unknown geometry: " + g.gtype.String())
-	}
+	return g.gtype
 }
 
 // IsGeometryCollection return true iff the Geometry is a GeometryCollection geometry.
@@ -533,34 +516,26 @@ func (g Geometry) ConvexHull() Geometry {
 }
 
 // TransformXY transforms this Geometry into another geometry according the
-// mapping provided by the XY function. Some classes of mappings (such as
-// affine transformations) will preserve the validity this Geometry in the
-// transformed Geometry, in which case no error will be returned. Other
-// types of transformations may result in a validation error if their
-// mapping results in an invalid Geometry.
-func (g Geometry) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (Geometry, error) {
+// mapping provided by the XY function. Because the mapping is arbitrary, it
+// has the potential to create an invalid geometry. This can be checked by
+// calling the Validate method on the result. Most mappings useful for GIS
+// applications will preserve validity.
+func (g Geometry) TransformXY(fn func(XY) XY) Geometry {
 	switch g.gtype {
 	case TypeGeometryCollection:
-		gt, err := g.MustAsGeometryCollection().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsGeometryCollection().TransformXY(fn).AsGeometry()
 	case TypePoint:
-		gt, err := g.MustAsPoint().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsPoint().TransformXY(fn).AsGeometry()
 	case TypeLineString:
-		gt, err := g.MustAsLineString().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsLineString().TransformXY(fn).AsGeometry()
 	case TypePolygon:
-		gt, err := g.MustAsPolygon().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsPolygon().TransformXY(fn).AsGeometry()
 	case TypeMultiPoint:
-		gt, err := g.MustAsMultiPoint().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsMultiPoint().TransformXY(fn).AsGeometry()
 	case TypeMultiLineString:
-		gt, err := g.MustAsMultiLineString().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsMultiLineString().TransformXY(fn).AsGeometry()
 	case TypeMultiPolygon:
-		gt, err := g.MustAsMultiPolygon().TransformXY(fn, opts...)
-		return gt.AsGeometry(), err
+		return g.MustAsMultiPolygon().TransformXY(fn).AsGeometry()
 	default:
 		panic("unknown geometry: " + g.gtype.String())
 	}
@@ -946,14 +921,15 @@ func (g Geometry) String() string {
 }
 
 // Simplify returns a simplified version of the geometry using the
-// Ramer-Douglas-Peucker algorithm. Sometimes a simplified geometry can become
-// invalid, in which case an error is returned rather than attempting to fix
-// the geometry. Validation of the result can be skipped by making use of the
-// geometry constructor options.
-func (g Geometry) Simplify(threshold float64, opts ...ConstructorOption) (Geometry, error) {
+// Ramer-Douglas-Peucker algorithm. Simplification can cause Polygons and
+// MultiPolygons to become invalid, in which case an error is returned rather
+// than attempting to fix them them. NoValidate{} can be passed in, causing
+// this validation to be skipped (potentially resulting in invalid geometries
+// being returned).
+func (g Geometry) Simplify(threshold float64, nv ...NoValidate) (Geometry, error) {
 	switch g.gtype {
 	case TypeGeometryCollection:
-		c, err := g.MustAsGeometryCollection().Simplify(threshold, opts...)
+		c, err := g.MustAsGeometryCollection().Simplify(threshold, nv...)
 		return c.AsGeometry(), err
 	case TypePoint:
 		return g, nil
@@ -961,15 +937,38 @@ func (g Geometry) Simplify(threshold float64, opts ...ConstructorOption) (Geomet
 		c := g.MustAsLineString().Simplify(threshold)
 		return c.AsGeometry(), nil
 	case TypePolygon:
-		c, err := g.MustAsPolygon().Simplify(threshold, opts...)
+		c, err := g.MustAsPolygon().Simplify(threshold, nv...)
 		return c.AsGeometry(), err
 	case TypeMultiPoint:
 		return g, nil
 	case TypeMultiLineString:
 		return g.MustAsMultiLineString().Simplify(threshold).AsGeometry(), nil
 	case TypeMultiPolygon:
-		c, err := g.MustAsMultiPolygon().Simplify(threshold, opts...)
+		c, err := g.MustAsMultiPolygon().Simplify(threshold, nv...)
 		return c.AsGeometry(), err
+	default:
+		panic("unknown type: " + g.Type().String())
+	}
+}
+
+// Validate checks if the Geometry is valid. See the documentation for each
+// concrete geometry's Validate method for details about the validation rules.
+func (g Geometry) Validate() error {
+	switch g.gtype {
+	case TypeGeometryCollection:
+		return g.MustAsGeometryCollection().Validate()
+	case TypePoint:
+		return g.MustAsPoint().Validate()
+	case TypeLineString:
+		return g.MustAsLineString().Validate()
+	case TypePolygon:
+		return g.MustAsPolygon().Validate()
+	case TypeMultiPoint:
+		return g.MustAsMultiPoint().Validate()
+	case TypeMultiLineString:
+		return g.MustAsMultiLineString().Validate()
+	case TypeMultiPolygon:
+		return g.MustAsMultiPolygon().Validate()
 	default:
 		panic("unknown type: " + g.Type().String())
 	}

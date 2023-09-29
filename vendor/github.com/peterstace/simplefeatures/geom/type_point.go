@@ -19,38 +19,20 @@ type Point struct {
 }
 
 // NewPoint creates a new point given its Coordinates.
-func NewPoint(c Coordinates, opts ...ConstructorOption) (Point, error) {
-	os := newOptionSet(opts)
-	if os.skipValidations {
-		return newUncheckedPoint(c), nil
-	}
-	if err := c.XY.validate(); err != nil {
-		if os.omitInvalid {
-			return NewEmptyPoint(c.Type), nil
-		}
-		return Point{}, validationError{err.Error()}
-	}
-	return newUncheckedPoint(c), nil
+//
+// It doesn't perform any validation on the result. The Validate method can be
+// used to check the validity of the result if needed.
+func NewPoint(c Coordinates) Point {
+	return Point{c, true}
 }
 
-// newUncheckedPoint constructs a point without checking any validations. It
-// may be used internally when the caller is sure that the coordinates don't
-// come directly from outside the library, or have already otherwise been
-// validated.
-//
-// An examples of valid use:
-//
-// - The coordinates have just been validated.
-//
-// - The coordinates are taken directly from the control points of a geometry
-// that has been validated.
-//
-// - The coordinates are derived from calculations based on control points of a
-// geometry that has been validated. Technically, these calculations could
-// overflow to +/- inf. However if control points are originally close to
-// infinity, many of the algorithms will be already broken in many other ways.
-func newUncheckedPoint(c Coordinates) Point {
-	return Point{c, true}
+// Validate checks if the Point is valid. For it to be valid, it must be empty
+// or not have NaN or Inf XY values.
+func (p Point) Validate() error {
+	if !p.full {
+		return nil
+	}
+	return p.coords.XY.validate()
 }
 
 // NewEmptyPoint creates a Point that is empty.
@@ -192,13 +174,13 @@ func (p *Point) UnmarshalJSON(buf []byte) error {
 }
 
 // TransformXY transforms this Point into another Point according to fn.
-func (p Point) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (Point, error) {
+func (p Point) TransformXY(fn func(XY) XY) Point {
 	if !p.full {
-		return p, nil
+		return p
 	}
 	newC := p.coords
 	newC.XY = fn(newC.XY)
-	return NewPoint(newC, opts...)
+	return NewPoint(newC)
 }
 
 // Centroid of a point is that point.

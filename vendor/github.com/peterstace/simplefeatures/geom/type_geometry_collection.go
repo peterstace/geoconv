@@ -19,7 +19,10 @@ type GeometryCollection struct {
 // NewGeometryCollection creates a collection of geometries. The coordinates
 // type of the GeometryCollection is the lowest common coordinates type of its
 // child geometries.
-func NewGeometryCollection(geoms []Geometry, opts ...ConstructorOption) GeometryCollection {
+//
+// It doesn't perform any validation on the result. The Validate method can be
+// used to check the validity of the result if needed.
+func NewGeometryCollection(geoms []Geometry) GeometryCollection {
 	if len(geoms) == 0 {
 		return GeometryCollection{}
 	}
@@ -33,6 +36,17 @@ func NewGeometryCollection(geoms []Geometry, opts ...ConstructorOption) Geometry
 		geoms[i] = geoms[i].ForceCoordinatesType(ctype)
 	}
 	return GeometryCollection{geoms, ctype}
+}
+
+// Validate checks if the GeometryCollection is valid. The only validation rule
+// is that each geometry in the collection must be valid.
+func (c GeometryCollection) Validate() error {
+	for i, g := range c.geoms {
+		if err := g.Validate(); err != nil {
+			return wrap(err, "validating geometry at index %d", i)
+		}
+	}
+	return nil
 }
 
 // Type returns the GeometryType for a GeometryCollection
@@ -199,7 +213,7 @@ func (c GeometryCollection) ConvexHull() Geometry {
 // this geometry as a GeoJSON geometry object.
 func (c GeometryCollection) MarshalJSON() ([]byte, error) {
 	buf := []byte(`{"type":"GeometryCollection","geometries":`)
-	var geoms = c.geoms
+	geoms := c.geoms
 	if geoms == nil {
 		geoms = []Geometry{}
 	}
@@ -219,16 +233,12 @@ func (c *GeometryCollection) UnmarshalJSON(buf []byte) error {
 }
 
 // TransformXY transforms this GeometryCollection into another GeometryCollection according to fn.
-func (c GeometryCollection) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (GeometryCollection, error) {
+func (c GeometryCollection) TransformXY(fn func(XY) XY) GeometryCollection {
 	transformed := make([]Geometry, len(c.geoms))
 	for i := range c.geoms {
-		var err error
-		transformed[i], err = c.geoms[i].TransformXY(fn, opts...)
-		if err != nil {
-			return GeometryCollection{}, wrapTransformed(err)
-		}
+		transformed[i] = c.geoms[i].TransformXY(fn)
 	}
-	return GeometryCollection{transformed, c.ctype}, nil
+	return GeometryCollection{transformed, c.ctype}
 }
 
 // Reverse in the case of GeometryCollection reverses each component and also
@@ -326,7 +336,7 @@ func (c GeometryCollection) pointCentroid() Point {
 			}
 		}
 	})
-	return sumPoints.Scale(1 / float64(numPoints)).asUncheckedPoint()
+	return sumPoints.Scale(1 / float64(numPoints)).AsPoint()
 }
 
 func (c GeometryCollection) linearCentroid() Point {
@@ -357,7 +367,7 @@ func (c GeometryCollection) linearCentroid() Point {
 			}
 		}
 	})
-	return weightedCentroid.Scale(1 / lengthSum).asUncheckedPoint()
+	return weightedCentroid.Scale(1 / lengthSum).AsPoint()
 }
 
 func (c GeometryCollection) arealCentroid() Point {
@@ -380,7 +390,7 @@ func (c GeometryCollection) arealCentroid() Point {
 				centroid.Scale(area / areaSum))
 		}
 	})
-	return weightedCentroid.asUncheckedPoint()
+	return weightedCentroid.AsPoint()
 }
 
 // CoordinatesType returns the CoordinatesType used to represent points making
@@ -526,17 +536,19 @@ func (c GeometryCollection) String() string {
 }
 
 // Simplify returns a simplified version of the GeometryCollection by applying
-// Simplify to each child geometry. Any supplied ConstructorOptions will be
-// used when simplifying each child geometry.
-func (c GeometryCollection) Simplify(threshold float64, opts ...ConstructorOption) (GeometryCollection, error) {
+// Simplify to each child geometry. If simplification causes a child geometry
+// to become invalid, then an error is returned. NoValidate{} can be passed in
+// to disable geometry constraint validation, potentially resulting in an
+// invalid geometry being returned.
+func (c GeometryCollection) Simplify(threshold float64, nv ...NoValidate) (GeometryCollection, error) {
 	n := c.NumGeometries()
 	geoms := make([]Geometry, n)
 	for i := 0; i < n; i++ {
 		var err error
-		geoms[i], err = c.GeometryN(i).Simplify(threshold, opts...)
+		geoms[i], err = c.GeometryN(i).Simplify(threshold, nv...)
 		if err != nil {
 			return GeometryCollection{}, wrapSimplified(err)
 		}
 	}
-	return NewGeometryCollection(geoms, opts...), nil
+	return NewGeometryCollection(geoms), nil
 }

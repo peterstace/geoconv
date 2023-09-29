@@ -13,73 +13,49 @@ func BulkLoad(items []BulkItem) *RTree {
 	if len(items) == 0 {
 		return &RTree{}
 	}
-
-	levels := calculateLevels(len(items))
-	return &RTree{bulkInsert(items, levels), len(items)}
+	root := bulkInsert(items)
+	return &RTree{root, len(items)}
 }
 
-func calculateLevels(numItems int) int {
-	// We could theoretically do this calculation using math.Log. However,
-	// float precision issues can cause off-by-one errors in some scenarios.
-	// Instead, we calculate the number of levels using integer arithmetic
-	// only. This will be fast anyway, since the calculation only requires
-	// logarithmic time.
-	levels := 1
-	count := maxChildren
-	for count < numItems {
-		count *= maxChildren
-		levels++
-	}
-	return levels
-}
-
-func bulkInsert(items []BulkItem, levels int) *node {
-	if levels == 1 {
-		root := &node{isLeaf: true, numEntries: len(items)}
-		for i, item := range items {
-			root.entries[i] = entry{
-				box:      item.Box,
-				recordID: item.RecordID,
-			}
-		}
-		return root
+func bulkInsert(items []BulkItem) *node {
+	if len(items) == 0 {
+		panic("should not have recursed into bulkInsert without any items")
 	}
 
 	// NOTE: bulk loading is hardcoded around the fact that the min and max
 	// node cardinalities are 2 and 4.
 
-	// 6 is the first number of items that can be split into 3 nodes while
-	// respecting the minimum node cardinality, i.e. 6 = 2 + 2 + 2. Anything
-	// less than 6 must instead be split into 2 nodes.
-	if len(items) < 6 {
+	// 4 or fewer items can fit into a single node.
+	if len(items) <= 4 {
+		n := &node{numEntries: len(items)}
+		for i, item := range items {
+			n.entries[i] = entry{
+				box:      item.Box,
+				recordID: item.RecordID,
+			}
+		}
+		return n
+	}
+
+	// 5 to 8 items are put into 3 nodes (one intermediate
+	// node and two child nodes).
+	if len(items) <= 8 {
 		firstHalf, secondHalf := splitBulkItems2Ways(items)
-		return bulkNode(levels, firstHalf, secondHalf)
+		return bulkNode(firstHalf, secondHalf)
 	}
 
-	// 8 is the first number of items that can be split into 4 nodes while
-	// respecting the minimum node cardinality, i.e. 8 = 2 + 2 + 2 + 2.
-	// Anything less that 8 must instead be split into 3 nodes.
-	if len(items) < 8 {
-		firstThird, secondThird, thirdThird := splitBulkItems3Ways(items)
-		return bulkNode(levels, firstThird, secondThird, thirdThird)
-	}
-
-	// 4-way split:
+	// 9 or more items are split into 4 groups, completely filling the
+	// intermediate node.
 	firstHalf, secondHalf := splitBulkItems2Ways(items)
 	firstQuarter, secondQuarter := splitBulkItems2Ways(firstHalf)
 	thirdQuarter, fourthQuarter := splitBulkItems2Ways(secondHalf)
-	return bulkNode(levels, firstQuarter, secondQuarter, thirdQuarter, fourthQuarter)
+	return bulkNode(firstQuarter, secondQuarter, thirdQuarter, fourthQuarter)
 }
 
-func bulkNode(levels int, parts ...[]BulkItem) *node {
-	root := &node{
-		numEntries: len(parts),
-		parent:     nil,
-		isLeaf:     false,
-	}
+func bulkNode(parts ...[]BulkItem) *node {
+	root := &node{numEntries: len(parts)}
 	for i, part := range parts {
-		child := bulkInsert(part, levels-1)
-		child.parent = root
+		child := bulkInsert(part)
 		root.entries[i].child = child
 		root.entries[i].box = calculateBound(child)
 	}
@@ -91,21 +67,6 @@ func splitBulkItems2Ways(items []BulkItem) ([]BulkItem, []BulkItem) {
 	split := len(items) / 2
 	quickPartition(items, split, horizontal)
 	return items[:split], items[split:]
-}
-
-func splitBulkItems3Ways(items []BulkItem) ([]BulkItem, []BulkItem, []BulkItem) {
-	// We only need to split 3 ways when we have 6 or 7 elements. By making use
-	// of that assumption, we greatly simplify the logic in this function
-	// compared to if we were to implement a 3 way split in the general case.
-	if ln := len(items); ln != 6 && ln != 7 {
-		panic(len(items))
-	}
-
-	horizontal := itemsAreHorizontal(items)
-	quickPartition(items, 2, horizontal)
-	quickPartition(items[3:], 1, horizontal)
-
-	return items[:2], items[2:4], items[4:]
 }
 
 // quickPartition performs a partial in-place sort on the items slice. The
@@ -190,20 +151,11 @@ func quickPartition(items []BulkItem, k int, horizontal bool) {
 }
 
 func itemsAreHorizontal(items []BulkItem) bool {
-	// fastMin and fastMax are used rather than Box's combine method to avoid
-	// math.Min and math.Max calls (which are more expensive).
-	minX := items[0].Box.MinX
-	maxX := items[0].Box.MaxX
-	minY := items[0].Box.MinY
-	maxY := items[0].Box.MaxY
+	box := items[0].Box
 	for _, item := range items[1:] {
-		box := item.Box
-		minX = fastMin(minX, box.MinX)
-		maxX = fastMax(maxX, box.MaxX)
-		minY = fastMin(minY, box.MinY)
-		maxY = fastMax(maxY, box.MaxY)
+		box = combine(box, item.Box)
 	}
-	return maxX-minX > maxY-minY
+	return box.MaxX-box.MinX > box.MaxY-box.MinY
 }
 
 // fastMin is a faster but not functionally identical version of math.Min.

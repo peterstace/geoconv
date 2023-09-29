@@ -1,8 +1,9 @@
 package geom
 
 import (
-	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/peterstace/simplefeatures/rtree"
 )
@@ -108,7 +109,7 @@ func (e Envelope) AsGeometry() Geometry {
 	case e.IsEmpty():
 		return Geometry{}
 	case e.IsPoint():
-		return e.min().asUncheckedPoint().AsGeometry()
+		return e.min().AsPoint().AsGeometry()
 	case e.IsLine():
 		ln := line{e.min(), e.max()}
 		return ln.asLineString().AsGeometry()
@@ -123,14 +124,8 @@ func (e Envelope) AsGeometry() Geometry {
 		minX, e.minY,
 	}
 	seq := NewSequence(floats[:], DimXY)
-	ls, err := NewLineString(seq)
-	if err != nil {
-		panic(fmt.Sprintf("constructing geometry from envelope: %v", err))
-	}
-	poly, err := NewPolygon([]LineString{ls})
-	if err != nil {
-		panic(fmt.Sprintf("constructing geometry from envelope: %v", err))
-	}
+	ring := NewLineString(seq)
+	poly := NewPolygon([]LineString{ring})
 	return poly.AsGeometry()
 }
 
@@ -139,7 +134,7 @@ func (e Envelope) Min() Point {
 	if e.IsEmpty() {
 		return Point{}
 	}
-	return e.min().asUncheckedPoint()
+	return e.min().AsPoint()
 }
 
 // Max returns the point in the envelope with the maximum X and Y values.
@@ -147,7 +142,7 @@ func (e Envelope) Max() Point {
 	if e.IsEmpty() {
 		return Point{}
 	}
-	return e.max().asUncheckedPoint()
+	return e.max().AsPoint()
 }
 
 // MinMaxXYs returns the two XY values in the envelope that contain the minimum
@@ -225,7 +220,7 @@ func (e Envelope) Center() Point {
 	return e.min().
 		Add(e.max()).
 		Scale(0.5).
-		asUncheckedPoint()
+		AsPoint()
 }
 
 // Covers returns true if and only if this envelope entirely covers another
@@ -279,19 +274,59 @@ func (e Envelope) Distance(o Envelope) (float64, bool) {
 }
 
 // TransformXY transforms this Envelope into another Envelope according to fn.
-func (e Envelope) TransformXY(fn func(XY) XY) (Envelope, error) {
+func (e Envelope) TransformXY(fn func(XY) XY) Envelope {
 	min, max, ok := e.MinMaxXYs()
 	if !ok {
-		return Envelope{}, nil
+		return Envelope{}
 	}
-	return NewEnvelope([]XY{fn(min), fn(max)})
+	return newUncheckedEnvelope(fn(min), fn(max))
 }
 
-func (e Envelope) box() (rtree.Box, bool) {
+// AsBox converts this Envelope to an rtree.Box.
+func (e Envelope) AsBox() (rtree.Box, bool) {
 	return rtree.Box{
 		MinX: e.minX(),
 		MinY: e.minY,
 		MaxX: e.maxX,
 		MaxY: e.maxY,
 	}, !e.IsEmpty()
+}
+
+// BoundingDiagonal returns the LineString that goes from the point returned by
+// Min() to the point returned by Max(). If the envelope is degenerate and
+// represents a single point, then a Point is returned instead of a LineString.
+// If the Envelope is empty, then the empty Geometry (representing an empty
+// GeometryCollection) is returned.
+func (e Envelope) BoundingDiagonal() Geometry {
+	if e.IsEmpty() {
+		return Geometry{}
+	}
+	if e.IsPoint() {
+		return e.min().AsPoint().AsGeometry()
+	}
+
+	coords := []float64{e.minX(), e.minY, e.maxX, e.maxY}
+	seq := NewSequence(coords, DimXY)
+	return NewLineString(seq).AsGeometry()
+}
+
+// String implements the fmt.Stringer interface by printing the envelope in a
+// pseudo-WKT style.
+func (e Envelope) String() string {
+	var sb strings.Builder
+	sb.WriteString("ENVELOPE")
+	if e.IsEmpty() {
+		sb.WriteString(" EMPTY")
+		return sb.String()
+	}
+	sb.WriteRune('(')
+	add := func(f float64, r rune) {
+		sb.WriteString(strconv.FormatFloat(f, 'f', -1, 64))
+		sb.WriteRune(r)
+	}
+	add(e.minX(), ' ')
+	add(e.minY, ',')
+	add(e.maxX, ' ')
+	add(e.maxY, ')')
+	return sb.String()
 }

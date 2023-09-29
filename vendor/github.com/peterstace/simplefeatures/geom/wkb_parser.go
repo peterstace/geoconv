@@ -9,20 +9,30 @@ import (
 
 // UnmarshalWKB reads the Well Known Binary (WKB), and returns the
 // corresponding Geometry.
-func UnmarshalWKB(wkb []byte, opts ...ConstructorOption) (Geometry, error) {
+//
+// NoValidate{} can be passed in to disable geometry constraint validation.
+func UnmarshalWKB(wkb []byte, nv ...NoValidate) (Geometry, error) {
 	// Note that we purposefully DON'T check for the presence of trailing
 	// bytes. There is nothing in the OGC spec indicating that trailing bytes
 	// are illegal. Some Esri software will add (useless) trailing bytes to
 	// their WKBs.
-	p := wkbParser{body: wkb, opts: opts}
-	return p.run()
+	p := wkbParser{body: wkb}
+	g, err := p.run()
+	if err != nil {
+		return Geometry{}, err
+	}
+	if len(nv) == 0 {
+		if err := g.Validate(); err != nil {
+			return Geometry{}, err
+		}
+	}
+	return g, nil
 }
 
 type wkbParser struct {
 	body []byte
 	bo   byte
 	no   bool
-	opts []ConstructorOption
 }
 
 func (p *wkbParser) run() (Geometry, error) {
@@ -37,7 +47,7 @@ func (p *wkbParser) run() (Geometry, error) {
 }
 
 func (p *wkbParser) inner() (Geometry, error) {
-	inner := wkbParser{body: p.body, opts: p.opts}
+	inner := wkbParser{body: p.body}
 	g, err := inner.run()
 	if err != nil {
 		return Geometry{}, err
@@ -207,7 +217,7 @@ func (p *wkbParser) parsePoint(ctype CoordinatesType) (Point, error) {
 	if math.IsNaN(c.X) || math.IsNaN(c.Y) {
 		return Point{}, wkbSyntaxError{"point contains mixed NaN values"}
 	}
-	return NewPoint(c, p.opts...)
+	return NewPoint(c), nil
 }
 
 func (p *wkbParser) parseLineString(ctype CoordinatesType) (LineString, error) {
@@ -233,7 +243,7 @@ func (p *wkbParser) parseLineString(ctype CoordinatesType) (LineString, error) {
 	copy(floats, bytesAsFloats(seqData))
 
 	seq := NewSequence(floats, ctype)
-	return NewLineString(seq, p.opts...)
+	return NewLineString(seq), nil
 }
 
 // bytesAsFloats reinterprets the bytes slice as a float64 slice in a similar
@@ -271,7 +281,7 @@ func (p *wkbParser) parsePolygon(ctype CoordinatesType) (Polygon, error) {
 			return Polygon{}, err
 		}
 	}
-	return NewPolygon(rings, p.opts...)
+	return NewPolygon(rings), nil
 }
 
 func (p *wkbParser) parseMultiPoint(ctype CoordinatesType) (MultiPoint, error) {
@@ -293,7 +303,7 @@ func (p *wkbParser) parseMultiPoint(ctype CoordinatesType) (MultiPoint, error) {
 		}
 		pts[i] = geom.MustAsPoint()
 	}
-	return NewMultiPoint(pts, p.opts...), nil
+	return NewMultiPoint(pts), nil
 }
 
 func (p *wkbParser) parseMultiLineString(ctype CoordinatesType) (MultiLineString, error) {
@@ -315,7 +325,7 @@ func (p *wkbParser) parseMultiLineString(ctype CoordinatesType) (MultiLineString
 		}
 		lss[i] = geom.MustAsLineString()
 	}
-	return NewMultiLineString(lss, p.opts...), nil
+	return NewMultiLineString(lss), nil
 }
 
 func (p *wkbParser) parseMultiPolygon(ctype CoordinatesType) (MultiPolygon, error) {
@@ -337,7 +347,7 @@ func (p *wkbParser) parseMultiPolygon(ctype CoordinatesType) (MultiPolygon, erro
 		}
 		polys[i] = geom.MustAsPolygon()
 	}
-	return NewMultiPolygon(polys, p.opts...)
+	return NewMultiPolygon(polys), nil
 }
 
 func (p *wkbParser) parseGeometryCollection(ctype CoordinatesType) (GeometryCollection, error) {
@@ -355,5 +365,5 @@ func (p *wkbParser) parseGeometryCollection(ctype CoordinatesType) (GeometryColl
 			return GeometryCollection{}, err
 		}
 	}
-	return NewGeometryCollection(geoms, p.opts...), nil
+	return NewGeometryCollection(geoms), nil
 }

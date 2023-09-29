@@ -17,7 +17,10 @@ type MultiPoint struct {
 
 // NewMultiPoint creates a MultiPoint from a list of Points. The coordinate
 // type of the MultiPoint is the lowest common coordinates type of its Points.
-func NewMultiPoint(pts []Point, opts ...ConstructorOption) MultiPoint {
+//
+// It doesn't perform any validation on the result. The Validate method can be
+// used to check the validity of the result if needed.
+func NewMultiPoint(pts []Point) MultiPoint {
 	if len(pts) == 0 {
 		return MultiPoint{}
 	}
@@ -29,6 +32,17 @@ func NewMultiPoint(pts []Point, opts ...ConstructorOption) MultiPoint {
 
 	forced := forceCoordinatesTypeOfPointSlice(pts, ctype)
 	return MultiPoint{forced, ctype}
+}
+
+// Validate checks if the MultiPoint is valid. The only validation rule is that
+// each point in the collection must be valid.
+func (m MultiPoint) Validate() error {
+	for i, pt := range m.points {
+		if err := pt.Validate(); err != nil {
+			return wrap(err, "validating point at index %d", i)
+		}
+	}
+	return nil
 }
 
 // Type returns the GeometryType for a MultiPoint
@@ -202,24 +216,20 @@ func (m MultiPoint) Coordinates() Sequence {
 }
 
 // TransformXY transforms this MultiPoint into another MultiPoint according to fn.
-func (m MultiPoint) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (MultiPoint, error) {
+func (m MultiPoint) TransformXY(fn func(XY) XY) MultiPoint {
 	if len(m.points) == 0 {
-		return MultiPoint{}.ForceCoordinatesType(m.CoordinatesType()), nil
+		return MultiPoint{}.ForceCoordinatesType(m.CoordinatesType())
 	}
 	txPoints := make([]Point, len(m.points))
 	for i, pt := range m.points {
 		if c, ok := pt.Coordinates(); ok {
 			c.XY = fn(c.XY)
-			var err error
-			txPoints[i], err = NewPoint(c, opts...)
-			if err != nil {
-				return MultiPoint{}, err
-			}
+			txPoints[i] = NewPoint(c)
 		} else {
 			txPoints[i] = pt
 		}
 	}
-	return NewMultiPoint(txPoints), nil
+	return NewMultiPoint(txPoints)
 }
 
 // Centroid gives the centroid of the coordinates of the MultiPoint.
@@ -236,7 +246,7 @@ func (m MultiPoint) Centroid() Point {
 	if n == 0 {
 		return NewEmptyPoint(DimXY)
 	}
-	return sum.Scale(1 / float64(n)).asUncheckedPoint()
+	return sum.Scale(1 / float64(n)).AsPoint()
 }
 
 // Reverse in the case of MultiPoint outputs each component point in their

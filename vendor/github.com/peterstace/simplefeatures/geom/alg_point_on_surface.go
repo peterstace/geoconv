@@ -29,7 +29,7 @@ func (n *nearestPointAccumulator) consider(candidate Point) {
 	}
 
 	delta := targetXY.Sub(candidateXY)
-	candidateDist := delta.Dot(delta)
+	candidateDist := delta.lengthSq()
 	if n.point.IsEmpty() || candidateDist < n.dist {
 		n.dist = candidateDist
 		n.point = candidate
@@ -133,7 +133,7 @@ func pointOnAreaSurface(poly Polygon) (Point, float64) {
 	}
 	midX := (bestA + bestB) / 2
 
-	return XY{midX, midY}.asUncheckedPoint(), bestB - bestA
+	return XY{midX, midY}.AsPoint(), bestB - bestA
 }
 
 func sortAndUniquifyFloats(fs []float64) []float64 {

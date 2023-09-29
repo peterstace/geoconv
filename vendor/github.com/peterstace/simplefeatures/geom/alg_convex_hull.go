@@ -17,7 +17,7 @@ func convexHull(g Geometry) Geometry {
 
 	// Check for point case:
 	if !hasAtLeast2DistinctPointsInXYs(pts) {
-		return pts[0].asUncheckedPoint().AsGeometry()
+		return pts[0].AsPoint().AsGeometry()
 	}
 
 	hull := monotoneChain(pts)
@@ -36,12 +36,9 @@ func convexHull(g Geometry) Geometry {
 		floats[2*i+1] = hull[i].Y
 	}
 	seq := NewSequence(floats, DimXY)
-	ring, err := NewLineString(seq)
-	if err != nil {
-		panic(fmt.Errorf("bug in monotoneChain routine - didn't produce a valid ring: %w", err))
-	}
-	poly, err := NewPolygon([]LineString{ring})
-	if err != nil {
+	ring := NewLineString(seq)
+	poly := NewPolygon([]LineString{ring})
+	if err := poly.Validate(); err != nil {
 		panic(fmt.Errorf("bug in monotoneChain routine - didn't produce a valid polygon: %w", err))
 	}
 	return poly.AsGeometry()
