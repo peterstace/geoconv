@@ -3,7 +3,6 @@ package geom
 import (
 	"database/sql/driver"
 	"fmt"
-	"math"
 	"unsafe"
 
 	"github.com/peterstace/simplefeatures/rtree"
@@ -12,48 +11,33 @@ import (
 // LineString is a linear geometry defined by linear interpolation between a
 // finite set of points. Its zero value is the empty line string. It is
 // immutable after creation.
-//
-// A LineString must consist of either zero points (i.e. it is the empty line
-// string), or it must have at least 2 points with distinct XY values.
 type LineString struct {
 	seq Sequence
 }
 
-// NewLineString creates a new LineString from a Sequence of points. The
-// sequence must contain exactly 0 points, or at least 2 points with distinct
-// XY values (otherwise an error is returned).
-func NewLineString(seq Sequence, opts ...ConstructorOption) (LineString, error) {
-	ctorOpts := newOptionSet(opts)
-	if ctorOpts.skipValidations {
-		return LineString{seq}, nil
-	}
-	if ctorOpts.omitInvalid {
-		return newLineStringWithOmitInvalid(seq), nil
-	}
-
-	if err := validateLineStringSeq(seq); err != nil {
-		return LineString{}, err
-	}
-	return LineString{seq}, nil
-}
-
-func newLineStringWithOmitInvalid(seq Sequence) LineString {
-	if err := validateLineStringSeq(seq); err != nil {
-		return LineString{}.ForceCoordinatesType(seq.CoordinatesType())
-	}
+// NewLineString creates a new LineString from a Sequence of points.
+//
+// It doesn't perform any validation on the result. The Validate method can be
+// used to check the validity of the result if needed.
+func NewLineString(seq Sequence) LineString {
 	return LineString{seq}
 }
 
-func validateLineStringSeq(seq Sequence) error {
-	if seq.Length() == 0 {
+// Validate checks if the LineString is valid. For it to be valid, the
+// following rules must hold.
+//
+//  1. The XY values must not be NaN or Inf.
+//  2. For non-empty LineStrings, there must be at least two distinct XY
+//     values.
+func (s LineString) Validate() error {
+	if s.seq.Length() == 0 {
 		return nil
 	}
-	if !hasAtLeast2DistinctPointsInSeq(seq) {
-		return validationError{
-			"non-empty linestring contains only one distinct XY value"}
+	if err := s.seq.validate(); err != nil {
+		return err
 	}
-	if err := seq.validate(); err != nil {
-		return validationError{err.Error()}
+	if !hasAtLeast2DistinctPointsInSeq(s.seq) {
+		return violateTwoPoints.errAtXY(s.seq.GetXY(0))
 	}
 	return nil
 }
@@ -89,7 +73,7 @@ func (s LineString) StartPoint() Point {
 		return NewEmptyPoint(s.CoordinatesType())
 	}
 	c := s.seq.Get(0)
-	return newUncheckedPoint(c)
+	return NewPoint(c)
 }
 
 // EndPoint gives the last point of the LineString. If the LineString is empty
@@ -100,7 +84,7 @@ func (s LineString) EndPoint() Point {
 	}
 	end := s.seq.Length() - 1
 	c := s.seq.Get(end)
-	return newUncheckedPoint(c)
+	return NewPoint(c)
 }
 
 // AsText returns the WKT (Well Known Text) representation of this geometry.
@@ -313,10 +297,9 @@ func (s LineString) Coordinates() Sequence {
 }
 
 // TransformXY transforms this LineString into another LineString according to fn.
-func (s LineString) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (LineString, error) {
+func (s LineString) TransformXY(fn func(XY) XY) LineString {
 	transformed := transformSequence(s.seq, fn)
-	ls, err := NewLineString(transformed, opts...)
-	return ls, wrapTransformed(err)
+	return NewLineString(transformed)
 }
 
 // IsRing returns true iff this LineString is both simple and closed (i.e. is a
@@ -333,7 +316,7 @@ func (s LineString) Length() float64 {
 		xyA := s.seq.GetXY(i)
 		xyB := s.seq.GetXY(i + 1)
 		delta := xyA.Sub(xyB)
-		sum += math.Sqrt(delta.Dot(delta))
+		sum += delta.Length()
 	}
 	return sum
 }
@@ -344,7 +327,7 @@ func (s LineString) Centroid() Point {
 	if sumLength == 0 {
 		return NewEmptyPoint(DimXY)
 	}
-	return sumXY.Scale(1.0 / sumLength).asUncheckedPoint()
+	return sumXY.Scale(1.0 / sumLength).AsPoint()
 }
 
 func sumCentroidAndLengthOfLineString(s LineString) (sumXY XY, sumLength float64) {
@@ -409,7 +392,7 @@ func (s LineString) PointOnSurface() Point {
 	n := s.seq.Length()
 	nearest := newNearestPointAccumulator(s.Centroid())
 	for i := 1; i < n-1; i++ {
-		candidate := s.seq.GetXY(i).asUncheckedPoint()
+		candidate := s.seq.GetXY(i).AsPoint()
 		nearest.consider(candidate)
 	}
 	if !nearest.point.IsEmpty() {
@@ -440,7 +423,11 @@ func (s LineString) Simplify(threshold float64) LineString {
 	seq := s.Coordinates()
 	floats := ramerDouglasPeucker(nil, seq, threshold)
 	seq = NewSequence(floats, seq.CoordinatesType())
-	return newLineStringWithOmitInvalid(seq)
+	ls := NewLineString(seq)
+	if ls.Validate() != nil {
+		return LineString{}.ForceCoordinatesType(s.CoordinatesType())
+	}
+	return ls
 }
 
 // InterpolatePoint returns a Point interpolated along the LineString at the

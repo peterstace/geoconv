@@ -9,38 +9,34 @@ import (
 	"github.com/peterstace/simplefeatures/geom"
 )
 
-func decodeInput(input []byte, format string, disableValidation bool) (geom.Geometry, error) {
-	var opts []geom.ConstructorOption
-	if disableValidation {
-		opts = []geom.ConstructorOption{geom.DisableAllValidations}
-	}
+func decodeInput(input []byte, format string, validate bool) (geom.Geometry, error) {
 	switch format {
 	case "any":
-		return decodeUsingAny(input, opts)
+		return decodeUsingAny(input, validate)
 	case "wkt":
-		return decodeUsingWKT(input, opts)
+		return decodeUsingWKT(input, validate)
 	case "geojson":
-		return decodeUsingGeoJSON(input, opts)
+		return decodeUsingGeoJSON(input, validate)
 	case "lonlat":
-		return decodeUsingLonLat(input, opts)
+		return decodeUsingLonLat(input, validate)
 	case "tile":
-		return decodeUsingTile(input, opts)
+		return decodeUsingTile(input, validate)
 	case "seq":
-		return decodeUsingSeq(input, opts)
+		return decodeUsingSeq(input, validate)
 	default:
 		return geom.Geometry{}, fmt.Errorf("unknown geometry format: %v", format)
 	}
 }
 
-func decodeUsingAny(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
-	for _, fn := range []func([]byte, []geom.ConstructorOption) (geom.Geometry, error){
+func decodeUsingAny(input []byte, validate bool) (geom.Geometry, error) {
+	for _, fn := range []func([]byte, bool) (geom.Geometry, error){
 		decodeUsingWKT,
 		decodeUsingGeoJSON,
 		decodeUsingLonLat,
 		decodeUsingTile,
 		decodeUsingSeq,
 	} {
-		g, err := fn(input, opts)
+		g, err := fn(input, validate)
 		if err != nil {
 			continue // try the next format
 		}
@@ -49,19 +45,27 @@ func decodeUsingAny(input []byte, opts []geom.ConstructorOption) (geom.Geometry,
 	return geom.Geometry{}, errors.New("could not parse using any format")
 }
 
-func decodeUsingWKT(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+func decodeUsingWKT(input []byte, validate bool) (geom.Geometry, error) {
 	// TODO: If we could detect _geometry validation_ errors here, we could
 	// bubble them up rather than using wrongFormatErr.
-	return geom.UnmarshalWKT(string(input), opts...)
+	var nv []geom.NoValidate
+	if !validate {
+		nv = append(nv, geom.NoValidate{})
+	}
+	return geom.UnmarshalWKT(string(input), nv...)
 }
 
-func decodeUsingGeoJSON(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+func decodeUsingGeoJSON(input []byte, validate bool) (geom.Geometry, error) {
 	// TODO: If we could detect _geometry validation_ errors here, we could
 	// bubble them up rather than using wrongFormatErr.
-	return geom.UnmarshalGeoJSON(input, opts...)
+	var nv []geom.NoValidate
+	if !validate {
+		nv = append(nv, geom.NoValidate{})
+	}
+	return geom.UnmarshalGeoJSON(input, nv...)
 }
 
-func decodeUsingLonLat(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+func decodeUsingLonLat(input []byte, validate bool) (geom.Geometry, error) {
 	parts := strings.Split(string(input), " ")
 	if len(parts) != 2 {
 		parts = strings.Split(string(input), ",")
@@ -80,11 +84,12 @@ func decodeUsingLonLat(input []byte, opts []geom.ConstructorOption) (geom.Geomet
 	if err != nil {
 		return geom.Geometry{}, err
 	}
-	pt, err := geom.XY{X: x, Y: y}.AsPoint()
+	pt := geom.XY{X: x, Y: y}.AsPoint()
+	err = pt.Validate()
 	return pt.AsGeometry(), err
 }
 
-func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+func decodeUsingTile(input []byte, validate bool) (geom.Geometry, error) {
 	parts := strings.Split(string(input), " ")
 	if len(parts) != 3 {
 		parts = strings.Split(string(input), "/")
@@ -107,7 +112,7 @@ func decodeUsingTile(input []byte, opts []geom.ConstructorOption) (geom.Geometry
 	return env.AsGeometry(), err
 }
 
-func decodeUsingSeq(input []byte, opts []geom.ConstructorOption) (geom.Geometry, error) {
+func decodeUsingSeq(input []byte, validate bool) (geom.Geometry, error) {
 	parts := strings.Split(string(input), ",")
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
@@ -130,15 +135,12 @@ func decodeUsingSeq(input []byte, opts []geom.ConstructorOption) (geom.Geometry,
 	case 0:
 		return geom.Geometry{}, fmt.Errorf("no items in sequence")
 	case 1:
-		pt, err := seq.GetXY(0).AsPoint(opts...)
-		return pt.AsGeometry(), err
+		pt := seq.GetXY(0).AsPoint()
+		return pt.AsGeometry(), pt.Validate()
 	default:
-		ring, err := geom.NewLineString(seq, opts...)
-		if err != nil {
-			return geom.Geometry{}, err
-		}
-		poly, err := geom.NewPolygon([]geom.LineString{ring}, opts...)
-		return poly.AsGeometry(), err
+		ring := geom.NewLineString(seq)
+		poly := geom.NewPolygon([]geom.LineString{ring})
+		return poly.AsGeometry(), poly.Validate()
 	}
 }
 

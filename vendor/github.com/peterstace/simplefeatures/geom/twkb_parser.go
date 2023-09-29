@@ -12,10 +12,20 @@ import (
 
 // UnmarshalTWKB parses a Tiny Well Known Binary (TWKB), returning the
 // corresponding Geometry.
-func UnmarshalTWKB(twkb []byte, opts ...ConstructorOption) (Geometry, error) {
-	p := newtwkbParser(twkb, opts...)
+//
+// NoValidate{} can be passed in to disable geometry constraint validation.
+func UnmarshalTWKB(twkb []byte, nv ...NoValidate) (Geometry, error) {
+	p := newTWKBParser(twkb)
 	g, err := p.nextGeometry()
-	return g, p.annotateError(err)
+	if err != nil {
+		return Geometry{}, p.annotateError(err)
+	}
+	if len(nv) == 0 {
+		if err := g.Validate(); err != nil {
+			return Geometry{}, err
+		}
+	}
+	return g, nil
 }
 
 // UnmarshalTWKBWithHeaders parses a Tiny Well Known Binary (TWKB),
@@ -27,11 +37,18 @@ func UnmarshalTWKB(twkb []byte, opts ...ConstructorOption) (Geometry, error) {
 //
 // If there is an ID list header, the ids slice will be populated with the
 // IDs from that header. Otherwise, the slice is empty.
-func UnmarshalTWKBWithHeaders(twkb []byte, opts ...ConstructorOption) (g Geometry, bbox []Point, ids []int64, err error) {
-	p := newtwkbParser(twkb, opts...)
+//
+// NoValidate{} can be passed in to disable geometry constraint validation.
+func UnmarshalTWKBWithHeaders(twkb []byte, nv ...NoValidate) (g Geometry, bbox []Point, ids []int64, err error) {
+	p := newTWKBParser(twkb)
 	g, err = p.nextGeometry()
 	if err != nil {
 		return Geometry{}, nil, nil, p.annotateError(err)
+	}
+	if len(nv) == 0 {
+		if err := g.Validate(); err != nil {
+			return Geometry{}, nil, nil, err
+		}
 	}
 	if p.hasBBox {
 		bbox, err = UnmarshalTWKBBoundingBoxHeader(twkb)
@@ -54,7 +71,7 @@ func UnmarshalTWKBWithHeaders(twkb []byte, opts ...ConstructorOption) (g Geometr
 // The function returns immediately after parsing the headers.
 // Any remaining geometry is not parsed by this function.
 func UnmarshalTWKBBoundingBoxHeader(twkb []byte) (bbox []Point, err error) {
-	p := newtwkbParser(twkb)
+	p := newTWKBParser(twkb)
 	bbox, err = p.parseBBoxHeader(twkb)
 	return bbox, p.annotateError(err)
 }
@@ -71,7 +88,7 @@ func UnmarshalTWKBBoundingBoxHeader(twkb []byte) (bbox []Point, err error) {
 // The function returns immediately after parsing the headers.
 // Any remaining geometry is not parsed by this function.
 func UnmarshalTWKBEnvelope(twkb []byte) (Envelope, error) {
-	p := newtwkbParser(twkb)
+	p := newTWKBParser(twkb)
 	if err := p.parseHeaders(); err != nil {
 		return Envelope{}, p.annotateError(err)
 	}
@@ -95,7 +112,6 @@ func UnmarshalTWKBEnvelope(twkb []byte) (Envelope, error) {
 type twkbParser struct {
 	twkb []byte
 	pos  int
-	opts []ConstructorOption
 
 	kind  twkbGeometryType
 	ctype CoordinatesType
@@ -120,10 +136,9 @@ type twkbParser struct {
 	refpoint [twkbMaxDimensions]int64
 }
 
-func newtwkbParser(twkb []byte, opts ...ConstructorOption) twkbParser {
+func newTWKBParser(twkb []byte) twkbParser {
 	return twkbParser{
 		twkb:       twkb,
-		opts:       opts,
 		ctype:      DimXY,
 		dimensions: 2,
 	}
@@ -336,8 +351,8 @@ func (p *twkbParser) parseBBoxHeader(twkb []byte) (bbox []Point, err error) {
 		maxZ := p.scalings[2] * float64(p.bbox[4]+p.bbox[5])
 		maxM := p.scalings[3] * float64(p.bbox[6]+p.bbox[7])
 
-		minPt := newUncheckedPoint(Coordinates{XY: XY{minX, minY}, Z: minZ, M: minM, Type: p.ctype})
-		maxPt := newUncheckedPoint(Coordinates{XY: XY{maxX, maxY}, Z: maxZ, M: maxM, Type: p.ctype})
+		minPt := NewPoint(Coordinates{XY: XY{minX, minY}, Z: minZ, M: minM, Type: p.ctype})
+		maxPt := NewPoint(Coordinates{XY: XY{maxX, maxY}, Z: maxZ, M: maxM, Type: p.ctype})
 		bbox = []Point{minPt, maxPt}
 
 	} else if p.hasZ {
@@ -349,8 +364,8 @@ func (p *twkbParser) parseBBoxHeader(twkb []byte) (bbox []Point, err error) {
 		maxY := p.scalings[1] * float64(p.bbox[2]+p.bbox[3])
 		maxZ := p.scalings[2] * float64(p.bbox[4]+p.bbox[5])
 
-		minPt := newUncheckedPoint(Coordinates{XY: XY{minX, minY}, Z: minZ, Type: p.ctype})
-		maxPt := newUncheckedPoint(Coordinates{XY: XY{maxX, maxY}, Z: maxZ, Type: p.ctype})
+		minPt := NewPoint(Coordinates{XY: XY{minX, minY}, Z: minZ, Type: p.ctype})
+		maxPt := NewPoint(Coordinates{XY: XY{maxX, maxY}, Z: maxZ, Type: p.ctype})
 		bbox = []Point{minPt, maxPt}
 
 	} else if p.hasM {
@@ -362,8 +377,8 @@ func (p *twkbParser) parseBBoxHeader(twkb []byte) (bbox []Point, err error) {
 		maxY := p.scalings[1] * float64(p.bbox[2]+p.bbox[3])
 		maxM := p.scalings[2] * float64(p.bbox[4]+p.bbox[5])
 
-		minPt := newUncheckedPoint(Coordinates{XY: XY{minX, minY}, M: minM, Type: p.ctype})
-		maxPt := newUncheckedPoint(Coordinates{XY: XY{maxX, maxY}, M: maxM, Type: p.ctype})
+		minPt := NewPoint(Coordinates{XY: XY{minX, minY}, M: minM, Type: p.ctype})
+		maxPt := NewPoint(Coordinates{XY: XY{maxX, maxY}, M: maxM, Type: p.ctype})
 		bbox = []Point{minPt, maxPt}
 
 	} else {
@@ -373,8 +388,8 @@ func (p *twkbParser) parseBBoxHeader(twkb []byte) (bbox []Point, err error) {
 		maxX := p.scalings[0] * float64(p.bbox[0]+p.bbox[1])
 		maxY := p.scalings[1] * float64(p.bbox[2]+p.bbox[3])
 
-		minPt := newUncheckedPoint(Coordinates{XY: XY{minX, minY}, Type: p.ctype})
-		maxPt := newUncheckedPoint(Coordinates{XY: XY{maxX, maxY}, Type: p.ctype})
+		minPt := NewPoint(Coordinates{XY: XY{minX, minY}, Type: p.ctype})
+		maxPt := NewPoint(Coordinates{XY: XY{maxX, maxY}, Type: p.ctype})
 		bbox = []Point{minPt, maxPt}
 	}
 	return bbox, nil
@@ -407,12 +422,12 @@ func (p *twkbParser) nextPoint() (Point, error) {
 		c.M = coords[2]
 	}
 
-	return NewPoint(c, p.opts...)
+	return NewPoint(c), nil
 }
 
 func (p *twkbParser) parseLineString() (LineString, error) {
 	if p.isEmpty {
-		return NewLineString(NewSequence(nil, p.ctype), p.opts...)
+		return NewLineString(NewSequence(nil, p.ctype)), nil
 	}
 	return p.nextLineString()
 }
@@ -422,12 +437,12 @@ func (p *twkbParser) nextLineString() (LineString, error) {
 	if err != nil {
 		return LineString{}, err
 	}
-	return NewLineString(NewSequence(coords, p.ctype), p.opts...)
+	return NewLineString(NewSequence(coords, p.ctype)), nil
 }
 
 func (p *twkbParser) parsePolygon() (Polygon, error) {
 	if p.isEmpty {
-		return NewPolygon(nil, p.opts...)
+		return NewPolygon(nil), nil
 	}
 	return p.nextPolygon()
 }
@@ -469,18 +484,15 @@ func (p *twkbParser) nextPolygon() (Polygon, error) {
 				}
 			}
 		}
-		ls, err := NewLineString(NewSequence(coords, p.ctype), p.opts...)
-		if err != nil {
-			return Polygon{}, err
-		}
+		ls := NewLineString(NewSequence(coords, p.ctype))
 		rings = append(rings, ls)
 	}
-	return NewPolygon(rings, p.opts...)
+	return NewPolygon(rings), nil
 }
 
 func (p *twkbParser) parseMultiPoint() (MultiPoint, error) {
 	if p.isEmpty {
-		return NewMultiPoint(nil, p.opts...), nil
+		return NewMultiPoint(nil), nil
 	}
 	return p.nextMultiPoint()
 }
@@ -501,12 +513,12 @@ func (p *twkbParser) nextMultiPoint() (MultiPoint, error) {
 		}
 		pts = append(pts, pt)
 	}
-	return NewMultiPoint(pts, p.opts...), nil
+	return NewMultiPoint(pts), nil
 }
 
 func (p *twkbParser) parseMultiLineString() (MultiLineString, error) {
 	if p.isEmpty {
-		return NewMultiLineString(nil, p.opts...), nil
+		return NewMultiLineString(nil), nil
 	}
 	return p.nextMultiLineString()
 }
@@ -527,12 +539,12 @@ func (p *twkbParser) nextMultiLineString() (MultiLineString, error) {
 		}
 		lines = append(lines, ls)
 	}
-	return NewMultiLineString(lines, p.opts...), nil
+	return NewMultiLineString(lines), nil
 }
 
 func (p *twkbParser) parseMultiPolygon() (MultiPolygon, error) {
 	if p.isEmpty {
-		return NewMultiPolygon(nil, p.opts...)
+		return NewMultiPolygon(nil), nil
 	}
 	return p.nextMultiPolygon()
 }
@@ -553,12 +565,12 @@ func (p *twkbParser) nextMultiPolygon() (MultiPolygon, error) {
 		}
 		polys = append(polys, poly)
 	}
-	return NewMultiPolygon(polys, p.opts...)
+	return NewMultiPolygon(polys), nil
 }
 
 func (p *twkbParser) parseGeometryCollection() (GeometryCollection, error) {
 	if p.isEmpty {
-		return NewGeometryCollection(nil, p.opts...), nil
+		return NewGeometryCollection(nil), nil
 	}
 	return p.nextGeometryCollection()
 }
@@ -573,7 +585,7 @@ func (p *twkbParser) nextGeometryCollection() (GeometryCollection, error) {
 	}
 	var geoms []Geometry
 	for i := 0; i < int(numGeoms); i++ {
-		subParser := newtwkbParser(p.twkb[p.pos:], p.opts...)
+		subParser := newTWKBParser(p.twkb[p.pos:])
 		g, nbytes, err := subParser.parseGeometry()
 		if err != nil {
 			p.pos += nbytes // Add sub-parser's last known position, for error reporting.
@@ -582,7 +594,7 @@ func (p *twkbParser) nextGeometryCollection() (GeometryCollection, error) {
 		p.pos += nbytes // Sub-parser's geometry has been read, so ensure it is skipped.
 		geoms = append(geoms, g)
 	}
-	return NewGeometryCollection(geoms, p.opts...), nil
+	return NewGeometryCollection(geoms), nil
 }
 
 // Read a number of points then convert that many points from int to float coords.
@@ -602,7 +614,7 @@ func (p *twkbParser) parsePointCountAndArray() ([]float64, int, error) {
 // Utilise and update the running memory of the previous reference point.
 // The returned array will contain numPoints * the number of dimensions values.
 func (p *twkbParser) parsePointArray(numPoints int) ([]float64, error) {
-	var coords = make([]float64, numPoints*int(p.dimensions))
+	coords := make([]float64, numPoints*int(p.dimensions))
 	c := 0
 	for i := 0; i < numPoints; i++ {
 		for d := 0; d < p.dimensions; d++ {

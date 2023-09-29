@@ -9,63 +9,63 @@ import (
 )
 
 // MultiPolygon is a planar surface geometry that consists of a collection of
-// Polygons. The zero value is the empty MultiPolygon (i.e. the collection of
-// zero Polygons). It is immutable after creation.
-//
-// For a MultiPolygon to be valid, the following assertions must hold:
-//
-// 1. It must be made up of zero or more valid Polygons (any of which may be empty).
-//
-// 2. The interiors of any two polygons must not intersect.
-//
-// 3. The boundaries of any two polygons may touch only at a finite number of points.
+// (possibly empty) Polygons. The zero value is the empty MultiPolygon (i.e.
+// the collection of zero Polygons). It is immutable after creation.
 type MultiPolygon struct {
 	// Invariant: ctype matches the coordinates type of each polygon.
 	polys []Polygon
 	ctype CoordinatesType
 }
 
-// NewMultiPolygon creates a MultiPolygon from its constituent Polygons. It
-// gives an error if any of the MultiPolygon assertions are not maintained. The
+// NewMultiPolygon creates a MultiPolygon from its constituent Polygons. The
 // coordinates type of the MultiPolygon is the lowest common coordinates type
-// its Polygons.
-func NewMultiPolygon(polys []Polygon, opts ...ConstructorOption) (MultiPolygon, error) {
-	if len(polys) == 0 {
-		return MultiPolygon{}, nil
-	}
-
-	ctype := DimXYZM
-	for _, p := range polys {
-		ctype &= p.CoordinatesType()
+// of its Polygons.
+//
+// It doesn't perform any validation on the result. The Validate method can be
+// used to check the validity of the result if needed.
+func NewMultiPolygon(polys []Polygon) MultiPolygon {
+	ctype := DimXY
+	if len(polys) > 0 {
+		ctype = DimXYZM
+		for _, p := range polys {
+			ctype &= p.CoordinatesType()
+		}
 	}
 	polys = append([]Polygon(nil), polys...)
 	for i := range polys {
 		polys[i] = polys[i].ForceCoordinatesType(ctype)
 	}
-
-	ctorOpts := newOptionSet(opts)
-	if err := validateMultiPolygon(polys, ctorOpts); err != nil {
-		if ctorOpts.omitInvalid {
-			return MultiPolygon{}, nil
-		}
-		return MultiPolygon{}, err
-	}
-	return MultiPolygon{polys, ctype}, nil
+	return MultiPolygon{polys, ctype}
 }
 
-func validateMultiPolygon(polys []Polygon, opts ctorOptionSet) error {
-	if opts.skipValidations {
-		return nil
+// Validate checks if the MultiPolygon is valid.
+//
+// The Polygons that make up a MultiPolygon are constrained by the following
+// rules:
+//
+//  1. Each child polygon must be valid.
+//  2. The interiors of any two child polygons must not intersect.
+//  3. The boundaries of any two child polygons may touch only at a finite
+//     number of points.
+func (m MultiPolygon) Validate() error {
+	for i, poly := range m.polys {
+		if err := poly.Validate(); err != nil {
+			return wrap(err, "validating polygon at index %d", i)
+		}
 	}
+	err := m.checkMultiPolygonConstraints()
+	return wrap(err, "validating multipolygon constraints")
+}
 
-	polyBoundaries := make([]indexedLines, len(polys))
-	polyBoundaryPopulated := make([]bool, len(polys))
+func (m MultiPolygon) checkMultiPolygonConstraints() error {
+	polyBoundaries := make([]indexedLines, len(m.polys))
+	polyBoundaryPopulated := make([]bool, len(m.polys))
 
 	// Construct RTree of Polygons.
-	boxes := make([]rtree.Box, len(polys))
-	items := make([]rtree.BulkItem, 0, len(polys))
-	for i, p := range polys {
-		if box, ok := p.Envelope().box(); ok {
+	boxes := make([]rtree.Box, len(m.polys))
+	items := make([]rtree.BulkItem, 0, len(m.polys))
+	for i, p := range m.polys {
+		if box, ok := p.Envelope().AsBox(); ok {
 			boxes[i] = box
 			item := rtree.BulkItem{Box: boxes[i], RecordID: i}
 			items = append(items, item)
@@ -73,8 +73,8 @@ func validateMultiPolygon(polys []Polygon, opts ctorOptionSet) error {
 	}
 	tree := rtree.BulkLoad(items)
 
-	for i := range polys {
-		if polys[i].IsEmpty() {
+	for i := range m.polys {
+		if m.polys[i].IsEmpty() {
 			continue
 		}
 		if err := tree.RangeSearch(boxes[i], func(j int) error {
@@ -85,7 +85,7 @@ func validateMultiPolygon(polys []Polygon, opts ctorOptionSet) error {
 
 			for _, k := range [...]int{i, j} {
 				if !polyBoundaryPopulated[k] {
-					polyBoundaries[k] = newIndexedLines(polys[k].Boundary().asLines())
+					polyBoundaries[k] = newIndexedLines(m.polys[k].Boundary().asLines())
 					polyBoundaryPopulated[k] = true
 				}
 			}
@@ -94,8 +94,8 @@ func validateMultiPolygon(polys []Polygon, opts ctorOptionSet) error {
 				polyBoundaries[j],
 			)
 			if !interMLS.IsEmpty() {
-				return validationError{"multipolygon child polygon " +
-					"boundaries intersect at multiple points"}
+				return violatePolysMultiTouch.errAtPt(
+					arbitraryControlPoint(interMLS.AsGeometry()))
 			}
 
 			// Fast case: If both the point and line parts of the intersection
@@ -106,11 +106,12 @@ func validateMultiPolygon(polys []Polygon, opts ctorOptionSet) error {
 			if interMP.IsEmpty() {
 				// We already know the polygons are NOT empty, so it's safe to
 				// directly access index 0.
-				ptI := polys[i].ExteriorRing().Coordinates().GetXY(0)
-				ptJ := polys[j].ExteriorRing().Coordinates().GetXY(0)
-				if relatePointToPolygon(ptI, polyBoundaries[j]) != exterior ||
-					relatePointToPolygon(ptJ, polyBoundaries[i]) != exterior {
-					return validationError{"multipolygon has nested child polygons"}
+				for _, dir := range []struct{ inIdx, outIdx int }{{i, j}, {j, i}} {
+					in := m.polys[dir.inIdx].ExteriorRing().Coordinates().GetXY(0)
+					out := polyBoundaries[dir.outIdx]
+					if relatePointToPolygon(in, out) != exterior {
+						return violatePolysMultiTouch.errAtXY(in)
+					}
 				}
 				return nil
 			}
@@ -166,8 +167,7 @@ func validatePolyNotInsidePoly(p1, p2 indexedLines) error {
 		for k := 0; k+1 < len(pts); k++ {
 			midpoint := pts[k].Add(pts[k+1]).Scale(0.5)
 			if relatePointToPolygon(midpoint, p1) == interior {
-				return validationError{fmt.Sprintf("multipolygon child polygon "+
-					"interiors intersect at %v", midpoint)}
+				return violatePolysMultiTouch.errAtXY(midpoint)
 			}
 		}
 	}
@@ -332,17 +332,13 @@ func (m MultiPolygon) Coordinates() [][]Sequence {
 }
 
 // TransformXY transforms this MultiPolygon into another MultiPolygon according to fn.
-func (m MultiPolygon) TransformXY(fn func(XY) XY, opts ...ConstructorOption) (MultiPolygon, error) {
+func (m MultiPolygon) TransformXY(fn func(XY) XY) MultiPolygon {
 	polys := make([]Polygon, m.NumPolygons())
 	for i := range polys {
-		transformed, err := m.PolygonN(i).TransformXY(fn, opts...)
-		if err != nil {
-			return MultiPolygon{}, wrapTransformed(err)
-		}
-		polys[i] = transformed
+		polys[i] = m.PolygonN(i).TransformXY(fn)
 	}
-	mp, err := NewMultiPolygon(polys, opts...)
-	return mp.ForceCoordinatesType(m.ctype), wrapTransformed(err)
+	mp := NewMultiPolygon(polys)
+	return mp.ForceCoordinatesType(m.ctype)
 }
 
 // Area in the case of a MultiPolygon is the sum of the areas of its polygons.
@@ -377,7 +373,7 @@ func (m MultiPolygon) Centroid() Point {
 			weightedCentroid = weightedCentroid.Add(centroid.Scale(areas[i] / totalArea))
 		}
 	}
-	return weightedCentroid.asUncheckedPoint()
+	return weightedCentroid.AsPoint()
 }
 
 // Reverse in the case of MultiPolygon outputs the component polygons in their original order,
@@ -550,13 +546,14 @@ func (m MultiPolygon) String() string {
 
 // Simplify returns a simplified version of the MultiPolygon by applying
 // Simplify to each child Polygon and constructing a new MultiPolygon from the
-// result. Any supplied ConstructorOptions will be used when simplifying each
-// child Polygon, or constructing the final MultiPolygon output.
-func (m MultiPolygon) Simplify(threshold float64, opts ...ConstructorOption) (MultiPolygon, error) {
+// result. If the result is invalid, then an error is returned. Geometry
+// constraint validation can be skipped by passing in NoValidate{}, potentially
+// resulting in an invalid geometry being returned.
+func (m MultiPolygon) Simplify(threshold float64, nv ...NoValidate) (MultiPolygon, error) {
 	n := m.NumPolygons()
 	polys := make([]Polygon, 0, n)
 	for i := 0; i < n; i++ {
-		poly, err := m.PolygonN(i).Simplify(threshold, opts...)
+		poly, err := m.PolygonN(i).Simplify(threshold, nv...)
 		if err != nil {
 			return MultiPolygon{}, err
 		}
@@ -564,6 +561,11 @@ func (m MultiPolygon) Simplify(threshold float64, opts ...ConstructorOption) (Mu
 			polys = append(polys, poly)
 		}
 	}
-	simpl, err := NewMultiPolygon(polys, opts...)
-	return simpl, wrapSimplified(err)
+	simpl := NewMultiPolygon(polys)
+	if len(nv) == 0 {
+		if err := simpl.Validate(); err != nil {
+			return MultiPolygon{}, wrapSimplified(err)
+		}
+	}
+	return simpl, nil
 }

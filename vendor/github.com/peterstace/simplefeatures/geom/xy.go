@@ -1,7 +1,6 @@
 package geom
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/peterstace/simplefeatures/rtree"
@@ -15,29 +14,20 @@ type XY struct {
 
 // validate checks if the XY value contains NaN, -inf, or +inf.
 func (w XY) validate() error {
-	if math.IsNaN(w.X) || math.IsInf(w.X, 0) {
-		return fmt.Errorf("invalid X value: %v", w.X)
+	if math.IsNaN(w.X) || math.IsNaN(w.Y) {
+		return violateNaN.errAtXY(w)
 	}
-	if math.IsNaN(w.Y) || math.IsInf(w.Y, 0) {
-		return fmt.Errorf("invalid Y value: %v", w.Y)
+	if math.IsInf(w.X, 0) || math.IsInf(w.Y, 0) {
+		return violateInf.errAtXY(w)
 	}
 	return nil
 }
 
 // AsPoint is a convenience function to convert this XY value into a Point
 // geometry.
-func (w XY) AsPoint(opts ...ConstructorOption) (Point, error) {
+func (w XY) AsPoint() Point {
 	coords := Coordinates{XY: w, Type: DimXY}
-	return NewPoint(coords, opts...)
-}
-
-// asUncheckedPoint is a convenience function to convert this XY value into a
-// Point. The Point is constructed without checking any validations. It may be
-// used internally when the caller is sure that the XY value doesn't come
-// directly from outside of the library without first being validated.
-func (w XY) asUncheckedPoint() Point {
-	coords := Coordinates{XY: w, Type: DimXY}
-	return newUncheckedPoint(coords)
+	return NewPoint(coords)
 }
 
 // uncheckedEnvelope is a convenience function to convert this XY value into
@@ -78,7 +68,10 @@ func (w XY) Scale(s float64) XY {
 // Cross returns the 2D cross product of this and another XY. This is defined
 // as the 'z' coordinate of the regular 3D cross product.
 func (w XY) Cross(o XY) float64 {
-	return (w.X * o.Y) - (w.Y * o.X)
+	// Avoid fused multiply-add by explicitly converting intermediate products
+	// to float64. This ensures that the cross product is *exactly* zero for
+	// all linearly dependent inputs.
+	return float64(w.X*o.Y) - float64(w.Y*o.X)
 }
 
 // Midpoint returns the midpoint of this and another XY.
@@ -98,7 +91,12 @@ func (w XY) Unit() XY {
 
 // Length treats XY as a vector, and returns its length.
 func (w XY) Length() float64 {
-	return math.Sqrt(w.Dot(w))
+	return math.Sqrt(w.lengthSq())
+}
+
+// lengthSq treats XY as a vector, and returns its squared length.
+func (w XY) lengthSq() float64 {
+	return w.Dot(w)
 }
 
 // Less gives an ordering on XYs. If two XYs have different X values, then the
