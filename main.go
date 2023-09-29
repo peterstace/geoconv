@@ -25,7 +25,8 @@ func main() {
 		log.Fatalf("could not read stdin: %v", err)
 	}
 
-	inputGeom, err := decodeInput(input, *inputFormat, *disableValidation)
+	validate := !*disableValidation
+	inputGeom, err := decodeInput(input, *inputFormat, validate)
 	if err != nil {
 		log.Fatalf("decoding input: %v", err)
 	}
@@ -39,12 +40,12 @@ func main() {
 			log.Fatalf("could not parse output precision as int: %v", err)
 		}
 		factor := math.Pow(10, float64(dp))
-		inputGeom, err = inputGeom.TransformXY(func(xy geom.XY) geom.XY {
+		inputGeom = inputGeom.TransformXY(func(xy geom.XY) geom.XY {
 			xy.X = math.Round(xy.X*factor) / factor
 			xy.Y = math.Round(xy.Y*factor) / factor
 			return xy
 		})
-		if err != nil {
+		if err := inputGeom.Validate(); err != nil {
 			log.Fatalf("could not modify precision: %v", err)
 		}
 	}
