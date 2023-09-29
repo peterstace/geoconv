@@ -1,3 +1,3 @@
 github.com/lib/pq v1.1.1/go.mod h1:5WUZQaWbwv1U+lTReE5YruASi9Al49XbQIvNi/34Woo=
-github.com/peterstace/simplefeatures v0.45.0 h1:8iEz8u0KhWneUUgO4LALQJHEps8V2ntNDbNB7VH8F/o=
-github.com/peterstace/simplefeatures v0.45.0/go.mod h1:ub+e2WFVeYzriHxqjmSzW5yqp67KXPAgcUhtQb26ay0=
+github.com/peterstace/simplefeatures v0.45.1 h1:V615OgtN8ZXYuM9h1UTtuQFn9AgAC1XQT2ipQyYZWVE=
+github.com/peterstace/simplefeatures v0.45.1/go.mod h1:nosSwG+GcVmAUBoxFWoyy1hS1qg0RuX0M9tmqsIzFX8=
