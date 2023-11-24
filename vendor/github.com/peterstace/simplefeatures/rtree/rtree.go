@@ -37,14 +37,14 @@ type RTree struct {
 
 // Stop is a special sentinel error that can be used to stop a search operation
 // without any error.
-var Stop = errors.New("stop")
+var Stop = errors.New("stop") //nolint:stylecheck,revive
 
 // RangeSearch looks for any items in the tree that overlap with the given
 // bounding box. The callback is called with the record ID for each found item.
 // If an error is returned from the callback then the search is terminated
 // early.  Any error returned from the callback is returned by RangeSearch,
 // except for the case where the special Stop sentinel error is returned (in
-// which case nil will be returned from RangeSearch).
+// which case nil will be returned from RangeSearch). Stop may be wrapped.
 func (t *RTree) RangeSearch(box Box, callback func(recordID int) error) error {
 	if t.root == nil {
 		return nil
@@ -57,7 +57,7 @@ func (t *RTree) RangeSearch(box Box, callback func(recordID int) error) error {
 				continue
 			}
 			if entry.child == nil {
-				if err := callback(entry.recordID); err == Stop {
+				if err := callback(entry.recordID); errors.Is(err, Stop) {
 					return nil
 				} else if err != nil {
 					return err

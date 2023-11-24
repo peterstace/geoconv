@@ -108,8 +108,7 @@ func decodeUsingTile(input []byte, validate bool) (geom.Geometry, error) {
 		return geom.Geometry{}, err
 	}
 
-	env, err := Tile{z, x, y}.AsEnvelope()
-	return env.AsGeometry(), err
+	return Tile{z, x, y}.AsEnvelope().AsGeometry(), nil
 }
 
 func decodeUsingSeq(input []byte, validate bool) (geom.Geometry, error) {

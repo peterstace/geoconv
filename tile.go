@@ -20,17 +20,17 @@ func LonLatToTile(lon, lat float64, z int) Tile {
 	return Tile{Z: z, X: x, Y: y}
 }
 
-func (t Tile) AsEnvelope() (geom.Envelope, error) {
-	return geom.NewEnvelope([]geom.XY{
-		{
+func (t Tile) AsEnvelope() geom.Envelope {
+	return geom.NewEnvelope(
+		geom.XY{
 			X: tileCoordsToLon(t.Z, t.X),
 			Y: tileCoordsToLat(t.Z, t.Y),
 		},
-		{
+		geom.XY{
 			X: tileCoordsToLon(t.Z, t.X+1),
 			Y: tileCoordsToLat(t.Z, t.Y+1),
 		},
-	})
+	)
 }
 
 func tileCoordsToLon(z, x int) float64 {

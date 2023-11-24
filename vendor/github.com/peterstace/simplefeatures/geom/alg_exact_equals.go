@@ -18,7 +18,7 @@ func newExactEqualsComparator(opts []ExactEqualsOption) exactEqualsComparator {
 }
 
 // ToleranceXY modifies the behaviour of the ExactEquals method by allowing two
-// geometry control points be be considered equal if their XY coordinates are
+// geometry control points be considered equal if their XY coordinates are
 // within the given euclidean distance of each other.
 func ToleranceXY(within float64) ExactEqualsOption {
 	return func(c exactEqualsComparator) exactEqualsComparator {
@@ -60,7 +60,7 @@ func (c exactEqualsComparator) eq(a, b Coordinates) bool {
 // For collections (MultiPoint, MultiLineString, MultiPolygon, and
 // GeometryCollection), the ordering of constituent elements in the collection
 // are ignored.
-func IgnoreOrder(c exactEqualsComparator) exactEqualsComparator {
+func IgnoreOrder(c exactEqualsComparator) exactEqualsComparator { //nolint:revive
 	c.ignoreOrder = true
 	return c
 }
