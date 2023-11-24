@@ -40,7 +40,7 @@ func NewEmptyPoint(ctype CoordinatesType) Point {
 	return Point{Coordinates{Type: ctype}, false}
 }
 
-// Type returns the GeometryType for a Point
+// Type returns the GeometryType for a Point.
 func (p Point) Type() GeometryType {
 	return TypePoint
 }
@@ -97,7 +97,7 @@ func (p Point) IsSimple() bool {
 // envelope, or an envelope covering a single point).
 func (p Point) Envelope() Envelope {
 	if xy, ok := p.XY(); ok {
-		return Envelope{}.uncheckedExtend(xy)
+		return Envelope{}.ExpandToIncludeXY(xy)
 	}
 	return Envelope{}
 }

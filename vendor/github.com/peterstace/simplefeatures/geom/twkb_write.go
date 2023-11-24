@@ -169,13 +169,14 @@ func newtwkbWriter(
 		w.dimensions++
 	}
 
-	if hasZ && hasM {
+	switch {
+	case hasZ && hasM:
 		w.ctype = DimXYZM
-	} else if hasZ {
+	case hasZ:
 		w.ctype = DimXYZ
-	} else if hasM {
+	case hasM:
 		w.ctype = DimXYM
-	} else {
+	default:
 		w.ctype = DimXY
 	}
 
@@ -253,23 +254,23 @@ func (w *twkbWriter) writePoint(pt Point) error {
 	}
 	w.writeInitialHeaders()
 
-	return w.writePointCoords(pt)
+	w.writePointCoords(pt)
+	return nil
 }
 
-func (w *twkbWriter) writePointCoords(pt Point) error {
+func (w *twkbWriter) writePointCoords(pt Point) {
 	switch pt.CoordinatesType() {
 	case DimXY:
-		w.writePoints(1, pt.coords.XY.X, pt.coords.XY.Y)
+		w.writeSinglePointArray(pt.coords.XY.X, pt.coords.XY.Y)
 	case DimXYZ:
-		w.writePoints(1, pt.coords.XY.X, pt.coords.XY.Y, pt.coords.Z)
+		w.writeSinglePointArray(pt.coords.XY.X, pt.coords.XY.Y, pt.coords.Z)
 	case DimXYM:
-		w.writePoints(1, pt.coords.XY.X, pt.coords.XY.Y, pt.coords.M)
+		w.writeSinglePointArray(pt.coords.XY.X, pt.coords.XY.Y, pt.coords.M)
 	case DimXYZM:
-		w.writePoints(1, pt.coords.XY.X, pt.coords.XY.Y, pt.coords.Z, pt.coords.M)
+		w.writeSinglePointArray(pt.coords.XY.X, pt.coords.XY.Y, pt.coords.Z, pt.coords.M)
 	default:
-		return fmt.Errorf("point has unsupported type %s", pt.CoordinatesType())
+		panic(fmt.Errorf("point has unknown type %s", pt.CoordinatesType()))
 	}
-	return nil
 }
 
 func (w *twkbWriter) writeLineString(ls LineString) error {
@@ -285,18 +286,18 @@ func (w *twkbWriter) writeLineString(ls LineString) error {
 	}
 	w.writeInitialHeaders()
 
-	return w.writeLineStringCoords(ls)
+	w.writeLineStringCoords(ls)
+	return nil
 }
 
-func (w *twkbWriter) writeLineStringCoords(ls LineString) error {
+func (w *twkbWriter) writeLineStringCoords(ls LineString) {
 	coords := ls.Coordinates()
 	numPoints := coords.Length()
 	w.writeUnsignedVarint(uint64(numPoints))
 	w.writePointArray(numPoints, coords.floats)
-	return nil
 }
 
-func (w *twkbWriter) writeRing(ls LineString) error {
+func (w *twkbWriter) writeRing(ls LineString) {
 	coords := ls.Coordinates()
 	numPoints := coords.Length()
 	if !w.closeRings && numPoints >= 2 {
@@ -304,7 +305,6 @@ func (w *twkbWriter) writeRing(ls LineString) error {
 	}
 	w.writeUnsignedVarint(uint64(numPoints))
 	w.writePointArray(numPoints, coords.floats)
-	return nil
 }
 
 func (w *twkbWriter) writePolygon(poly Polygon) error {
@@ -320,14 +320,15 @@ func (w *twkbWriter) writePolygon(poly Polygon) error {
 	}
 	w.writeInitialHeaders()
 
-	return w.writePolygonRings(poly)
+	w.writePolygonRings(poly)
+	return nil
 }
 
-func (w *twkbWriter) writePolygonRings(poly Polygon) error {
+func (w *twkbWriter) writePolygonRings(poly Polygon) {
 	w.writeUnsignedVarint(uint64(poly.NumRings()))
 
 	if poly.NumRings() == 0 {
-		return nil
+		return
 	}
 
 	ls := poly.ExteriorRing()
@@ -338,7 +339,6 @@ func (w *twkbWriter) writePolygonRings(poly Polygon) error {
 		ls = poly.InteriorRingN(i)
 		w.writeRing(ls)
 	}
-	return nil
 }
 
 func (w *twkbWriter) writeMultiPoint(mp MultiPoint) error {
@@ -445,7 +445,9 @@ func (w *twkbWriter) writeGeometryCollection(gc GeometryCollection) error {
 	for i := 0; i < numGeometries; i++ {
 		subWriter := copytwkbWriter(w)
 		g := gc.GeometryN(i)
-		subWriter.writeGeometry(g)
+		if err := subWriter.writeGeometry(g); err != nil {
+			return err
+		}
 		subTWKB := subWriter.formTWKB()
 		w.twkbContents = append(w.twkbContents, subTWKB...)
 	}
@@ -506,8 +508,8 @@ func (w *twkbWriter) writeExtendedPrecision() {
 	w.writeHeaderByte(ext)
 }
 
-func (w *twkbWriter) writePoints(numPoints int, coords ...float64) {
-	w.writePointArray(numPoints, coords)
+func (w *twkbWriter) writeSinglePointArray(coords ...float64) {
+	w.writePointArray(1, coords)
 }
 
 // Convert a given number of points from floating point to integer coordinates.
@@ -521,12 +523,13 @@ func (w *twkbWriter) writePointArray(numPoints int, coords []float64) {
 			fval := coords[c]
 			ival := int64(fval * w.scalings[d])
 			// Compute bounding box.
-			if !w.bboxValid {
+			switch {
+			case !w.bboxValid:
 				w.bboxMin[d] = ival
 				w.bboxMax[d] = ival
-			} else if ival < w.bboxMin[d] {
+			case ival < w.bboxMin[d]:
 				w.bboxMin[d] = ival
-			} else if ival > w.bboxMax[d] {
+			case ival > w.bboxMax[d]:
 				w.bboxMax[d] = ival
 			}
 			// Perform coord differencing to find the int value.
@@ -589,18 +592,16 @@ func (w *twkbWriter) writeIDList(num int) error {
 	return nil
 }
 
-func (w *twkbWriter) writeSignedVarint(val int64) int {
+func (w *twkbWriter) writeSignedVarint(val int64) {
 	var buf [binary.MaxVarintLen64]byte
 	n := binary.PutVarint(buf[:], val)
 	w.twkbContents = append(w.twkbContents, buf[:n]...)
-	return n
 }
 
-func (w *twkbWriter) writeUnsignedVarint(val uint64) int {
+func (w *twkbWriter) writeUnsignedVarint(val uint64) {
 	var buf [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(buf[:], val)
 	w.twkbContents = append(w.twkbContents, buf[:n]...)
-	return n
 }
 
 func (w *twkbWriter) writeHeaderByte(b byte) {

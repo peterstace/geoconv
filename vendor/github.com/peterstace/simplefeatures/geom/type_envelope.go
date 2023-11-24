@@ -14,88 +14,68 @@ import (
 // cases where the width or height (or both) are zero, or the envelope is
 // empty. Its bounds are validated so as to not be NaN or +/- Infinity.
 //
-// An envelope can be thought of as as being similar to a regular geometry, but
+// An envelope can be thought of as being similar to a regular geometry, but
 // can only represent an empty geometry, a single point, a horizontal or
 // vertical line, or an axis aligned rectangle with some area.
 //
 // The Envelope zero value is the empty envelope. Envelopes are immutable after
 // creation.
 type Envelope struct {
-	// nanXORMinX is the bit pattern of "min X" XORed with the bit pattern of
-	// NaN. This is so that when Envelope has its zero value, the logical value
-	// of "min X" is NaN. The logical value of "min X" being NaN is used to
-	// signify that the Envelope is empty.
-	nanXORMinX uint64
-
-	minY float64
-	maxX float64
-	maxY float64
-}
-
-var nan = math.Float64bits(math.NaN())
-
-// encodeFloat64WithNaN encodes a float64 by XORing it with NaN.
-func encodeFloat64WithNaN(f float64) uint64 {
-	return math.Float64bits(f) ^ nan
-}
-
-// minX decodes the logical value ("min X") of nanXORMinX.
-func (e Envelope) minX() float64 {
-	return math.Float64frombits(e.nanXORMinX ^ nan)
+	min, max XY
+	nonEmpty bool
 }
 
 // NewEnvelope returns the smallest envelope that contains all provided XYs.
 // It returns an error if any of the XYs contain NaN or +/- Infinity
 // coordinates.
-func NewEnvelope(xys []XY) (Envelope, error) {
+func NewEnvelope(xys ...XY) Envelope {
 	var env Envelope
 	for _, xy := range xys {
-		var err error
-		env, err = env.ExtendToIncludeXY(xy)
-		if err != nil {
-			return Envelope{}, err
-		}
+		env = env.ExpandToIncludeXY(xy)
 	}
-	return env, nil
+	return env
 }
 
 func newUncheckedEnvelope(min, max XY) Envelope {
-	return Envelope{
-		nanXORMinX: encodeFloat64WithNaN(min.X),
-		minY:       min.Y,
-		maxX:       max.X,
-		maxY:       max.Y,
+	return Envelope{min, max, true}
+}
+
+// Validate checks if the Envelope is valid. The only validation rule is that
+// the coordinates the Envelope was constructed from must not be NaN or +/-
+// infinity. An empty Envelope is always valid.
+func (e Envelope) Validate() error {
+	if e.IsEmpty() {
+		return nil
 	}
-}
-
-func (e Envelope) min() XY {
-	return XY{e.minX(), e.minY}
-}
-
-func (e Envelope) max() XY {
-	return XY{e.maxX, e.maxY}
+	if err := e.min.validate(); err != nil {
+		return wrap(err, "min coords invalid")
+	}
+	if err := e.max.validate(); err != nil {
+		return wrap(err, "max coords invalid")
+	}
+	return nil
 }
 
 // IsEmpty returns true if and only if this envelope is empty.
 func (e Envelope) IsEmpty() bool {
-	return math.IsNaN(e.minX())
+	return !e.nonEmpty
 }
 
 // IsPoint returns true if and only if this envelope represents a single point.
 func (e Envelope) IsPoint() bool {
-	return !e.IsEmpty() && e.min() == e.max()
+	return !e.IsEmpty() && e.min == e.max
 }
 
 // IsLine returns true if and only if this envelope represents a single line
 // (which must be either vertical or horizontal).
 func (e Envelope) IsLine() bool {
-	return !e.IsEmpty() && (e.minX() == e.maxX) != (e.minY == e.maxY)
+	return !e.IsEmpty() && (e.min.X == e.max.X) != (e.min.Y == e.max.Y)
 }
 
 // IsRectangle returns true if and only if this envelope represents a
 // non-degenerate rectangle with some area.
 func (e Envelope) IsRectangle() bool {
-	return !e.IsEmpty() && e.minX() != e.maxX && e.minY != e.maxY
+	return !e.IsEmpty() && e.min.X != e.max.X && e.min.Y != e.max.Y
 }
 
 // AsGeometry returns the envelope as a Geometry. In the regular case where the
@@ -109,19 +89,18 @@ func (e Envelope) AsGeometry() Geometry {
 	case e.IsEmpty():
 		return Geometry{}
 	case e.IsPoint():
-		return e.min().AsPoint().AsGeometry()
+		return e.min.AsPoint().AsGeometry()
 	case e.IsLine():
-		ln := line{e.min(), e.max()}
+		ln := line{e.min, e.max}
 		return ln.asLineString().AsGeometry()
 	}
 
-	minX := e.minX()
 	floats := [...]float64{
-		minX, e.minY,
-		minX, e.maxY,
-		e.maxX, e.maxY,
-		e.maxX, e.minY,
-		minX, e.minY,
+		e.min.X, e.min.Y,
+		e.min.X, e.max.Y,
+		e.max.X, e.max.Y,
+		e.max.X, e.min.Y,
+		e.min.X, e.min.Y,
 	}
 	seq := NewSequence(floats[:], DimXY)
 	ring := NewLineString(seq)
@@ -134,7 +113,7 @@ func (e Envelope) Min() Point {
 	if e.IsEmpty() {
 		return Point{}
 	}
-	return e.min().AsPoint()
+	return e.min.AsPoint()
 }
 
 // Max returns the point in the envelope with the maximum X and Y values.
@@ -142,7 +121,7 @@ func (e Envelope) Max() Point {
 	if e.IsEmpty() {
 		return Point{}
 	}
-	return e.max().AsPoint()
+	return e.max.AsPoint()
 }
 
 // MinMaxXYs returns the two XY values in the envelope that contain the minimum
@@ -153,34 +132,27 @@ func (e Envelope) MinMaxXYs() (XY, XY, bool) {
 	if e.IsEmpty() {
 		return XY{}, XY{}, false
 	}
-	return e.min(), e.max(), true
+	return e.min, e.max, true
 }
 
-// ExtendToIncludeXY returns the smallest envelope that contains all of the
-// points in this envelope along with the provided point. It gives an error if
-// the XY contains NaN or +/- Infinite coordinates.
-func (e Envelope) ExtendToIncludeXY(xy XY) (Envelope, error) {
-	if err := xy.validate(); err != nil {
-		return Envelope{}, err
-	}
-	return e.uncheckedExtend(xy), nil
-}
-
-// uncheckedExtend extends the envelope in the same manner as
-// ExtendToIncludeXY but doesn't validate the XY. It should only be used
-// when the XY doesn't come directly from user input.
-func (e Envelope) uncheckedExtend(xy XY) Envelope {
+// ExpandToIncludeXY returns the smallest envelope that contains all of the
+// points in this envelope along with the provided point. It will produce an
+// invalid envelope if any of the coordinates in the existing envelope or new
+// XY contain NaN or +/- infinity.
+func (e Envelope) ExpandToIncludeXY(xy XY) Envelope {
 	if e.IsEmpty() {
 		return newUncheckedEnvelope(xy, xy)
 	}
 	return newUncheckedEnvelope(
-		XY{fastMin(e.minX(), xy.X), fastMin(e.minY, xy.Y)},
-		XY{fastMax(e.maxX, xy.X), fastMax(e.maxY, xy.Y)},
+		XY{fastMin(e.min.X, xy.X), fastMin(e.min.Y, xy.Y)},
+		XY{fastMax(e.max.X, xy.X), fastMax(e.max.Y, xy.Y)},
 	)
 }
 
 // ExpandToIncludeEnvelope returns the smallest envelope that contains all of
-// the points in this envelope and another envelope.
+// the points in this envelope and another envelope. It will produce an invalid
+// envelope if min or max coordinates of either envelope contain NaN or +/-
+// infinity.
 func (e Envelope) ExpandToIncludeEnvelope(o Envelope) Envelope {
 	if e.IsEmpty() {
 		return o
@@ -189,8 +161,8 @@ func (e Envelope) ExpandToIncludeEnvelope(o Envelope) Envelope {
 		return e
 	}
 	return newUncheckedEnvelope(
-		XY{fastMin(e.minX(), o.minX()), fastMin(e.minY, o.minY)},
-		XY{fastMax(e.maxX, o.maxX), fastMax(e.maxY, o.maxY)},
+		XY{fastMin(e.min.X, o.min.X), fastMin(e.min.Y, o.min.Y)},
+		XY{fastMax(e.max.X, o.max.X), fastMax(e.max.Y, o.max.Y)},
 	)
 }
 
@@ -200,16 +172,16 @@ func (e Envelope) ExpandToIncludeEnvelope(o Envelope) Envelope {
 func (e Envelope) Contains(p XY) bool {
 	return !e.IsEmpty() &&
 		p.validate() == nil &&
-		p.X >= e.minX() && p.X <= e.maxX &&
-		p.Y >= e.minY && p.Y <= e.maxY
+		p.X >= e.min.X && p.X <= e.max.X &&
+		p.Y >= e.min.Y && p.Y <= e.max.Y
 }
 
 // Intersects returns true if and only if this envelope has any points in
 // common with another envelope.
 func (e Envelope) Intersects(o Envelope) bool {
 	return !e.IsEmpty() && !o.IsEmpty() &&
-		(e.minX() <= o.maxX) && (e.maxX >= o.minX()) &&
-		(e.minY <= o.maxY) && (e.maxY >= o.minY)
+		(e.min.X <= o.max.X) && (e.max.X >= o.min.X) &&
+		(e.min.Y <= o.max.Y) && (e.max.Y >= o.min.Y)
 }
 
 // Center returns the center point of the envelope.
@@ -217,8 +189,8 @@ func (e Envelope) Center() Point {
 	if e.IsEmpty() {
 		return Point{}
 	}
-	return e.min().
-		Add(e.max()).
+	return e.min.
+		Add(e.max).
 		Scale(0.5).
 		AsPoint()
 }
@@ -229,8 +201,8 @@ func (e Envelope) Center() Point {
 // Furthermore, an envelope can only be covered if it is non-empty.
 func (e Envelope) Covers(o Envelope) bool {
 	return !e.IsEmpty() && !o.IsEmpty() &&
-		e.minX() <= o.minX() && e.minY <= o.minY &&
-		e.maxX >= o.maxX && e.maxY >= o.maxY
+		e.min.X <= o.min.X && e.min.Y <= o.min.Y &&
+		e.max.X >= o.max.X && e.max.Y >= o.max.Y
 }
 
 // Width returns the difference between the maximum and minimum X coordinates
@@ -239,7 +211,7 @@ func (e Envelope) Width() float64 {
 	if e.IsEmpty() {
 		return 0
 	}
-	return e.maxX - e.minX()
+	return e.max.X - e.min.X
 }
 
 // Height returns the difference between the maximum and minimum X coordinates
@@ -248,7 +220,7 @@ func (e Envelope) Height() float64 {
 	if e.IsEmpty() {
 		return 0
 	}
-	return e.maxY - e.minY
+	return e.max.Y - e.min.Y
 }
 
 // Area returns the area covered by the envelope.
@@ -256,7 +228,7 @@ func (e Envelope) Area() float64 {
 	if e.IsEmpty() {
 		return 0
 	}
-	return (e.maxX - e.minX()) * (e.maxY - e.minY)
+	return (e.max.X - e.min.X) * (e.max.Y - e.min.Y)
 }
 
 // Distance calculates the shortest distance between this envelope and another
@@ -268,8 +240,8 @@ func (e Envelope) Distance(o Envelope) (float64, bool) {
 	if e.IsEmpty() || o.IsEmpty() {
 		return 0, false
 	}
-	dx := fastMax(0, fastMax(o.minX()-e.maxX, e.minX()-o.maxX))
-	dy := fastMax(0, fastMax(o.minY-e.maxY, e.minY-o.maxY))
+	dx := fastMax(0, fastMax(o.min.X-e.max.X, e.min.X-o.max.X))
+	dy := fastMax(0, fastMax(o.min.Y-e.max.Y, e.min.Y-o.max.Y))
 	return math.Sqrt(dx*dx + dy*dy), true
 }
 
@@ -290,10 +262,10 @@ func (e Envelope) TransformXY(fn func(XY) XY) Envelope {
 // AsBox converts this Envelope to an rtree.Box.
 func (e Envelope) AsBox() (rtree.Box, bool) {
 	return rtree.Box{
-		MinX: e.minX(),
-		MinY: e.minY,
-		MaxX: e.maxX,
-		MaxY: e.maxY,
+		MinX: e.min.X,
+		MinY: e.min.Y,
+		MaxX: e.max.X,
+		MaxY: e.max.Y,
 	}, !e.IsEmpty()
 }
 
@@ -307,10 +279,10 @@ func (e Envelope) BoundingDiagonal() Geometry {
 		return Geometry{}
 	}
 	if e.IsPoint() {
-		return e.min().AsPoint().AsGeometry()
+		return e.min.AsPoint().AsGeometry()
 	}
 
-	coords := []float64{e.minX(), e.minY, e.maxX, e.maxY}
+	coords := []float64{e.min.X, e.min.Y, e.max.X, e.max.Y}
 	seq := NewSequence(coords, DimXY)
 	return NewLineString(seq).AsGeometry()
 }
@@ -329,9 +301,9 @@ func (e Envelope) String() string {
 		sb.WriteString(strconv.FormatFloat(f, 'f', -1, 64))
 		sb.WriteRune(r)
 	}
-	add(e.minX(), ' ')
-	add(e.minY, ',')
-	add(e.maxX, ' ')
-	add(e.maxY, ')')
+	add(e.min.X, ' ')
+	add(e.min.Y, ',')
+	add(e.max.X, ' ')
+	add(e.max.Y, ')')
 	return sb.String()
 }
