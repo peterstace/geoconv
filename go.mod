@@ -2,4 +2,4 @@ module github.com/peterstace/geoconv
 
 go 1.13
 
-require github.com/peterstace/simplefeatures v0.46.0
+require github.com/peterstace/simplefeatures v0.47.0
