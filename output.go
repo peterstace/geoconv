@@ -74,7 +74,7 @@ func output(g geom.Geometry, outputFormat string) {
 		}
 
 		fmt.Println("Tiles")
-		for z := 8; z <= 22; z++ {
+		for z := 0; z <= 22; z++ {
 			tile := LonLatToTile(centroid.X, centroid.Y, z)
 			fmt.Printf("%d/%d/%d\n", tile.Z, tile.X, tile.Y)
 		}
